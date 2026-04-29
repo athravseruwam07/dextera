@@ -93,6 +93,7 @@ import { useGloveData } from "./lib/useGloveData";
 import { Canvas } from "@react-three/fiber";
 import { HandModel3D } from "./vr/components/HandModel3D";
 import { fetchCalibration, saveCalibration } from "./patient/patientApi";
+import { calibratedBendsFromRaw } from "./patient/ballPickupGrip";
 import {
   createDoctorGameLibraryPatient,
   doctorAppointmentToPatientCare,
@@ -1801,20 +1802,8 @@ function GloveDevPage({ patientId }: { patientId: string }) {
 
   const liveCalibratedBends = useMemo(() => {
     if (!calOpen || !calClosed || !glove.rawValues) return null;
-
-    return fingers.reduce<FingerBends>(
-      (acc, finger) => {
-        const raw = glove.rawValues?.[finger] ?? 0;
-        const openValue = calOpen[finger] ?? 0;
-        const closedValue = calClosed[finger] ?? 0;
-        const range = closedValue - openValue;
-        const percent = range === 0 ? 0 : Math.round(((raw - openValue) / range) * 100);
-        acc[finger] = Math.max(0, Math.min(100, percent));
-        return acc;
-      },
-      { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 }
-    );
-  }, [calClosed, calOpen, fingers, glove.rawValues]);
+    return calibratedBendsFromRaw(glove.rawValues, calOpen, calClosed);
+  }, [calClosed, calOpen, glove.rawValues]);
 
   const status = loadingCalibration
     ? { label: "Loading", background: "#e0f2fe", color: "#0f766e" }

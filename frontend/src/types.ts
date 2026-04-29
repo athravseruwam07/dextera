@@ -45,6 +45,17 @@ export interface FingerBends {
   pinky: number;
 }
 
+export interface FingerTapCalibrationProfile {
+  finger: FingerName;
+  raw: FingerBends;
+  bends: FingerBends;
+  signal: number;
+  stability: number;
+  pressThreshold: number;
+  releaseThreshold: number;
+  confidenceThreshold: number;
+}
+
 export interface GestureEvent extends FingerBends {
   id: string;
   patientId: string;
@@ -284,6 +295,7 @@ export interface CalibrationData {
   completedAt: string;
   steps: Partial<Record<CalibrationStep, FingerBends>>;
   fingerTaps: Partial<Record<FingerName, FingerBends>>;
+  fingerTapProfiles?: Partial<Record<FingerName, FingerTapCalibrationProfile>>;
   thresholds: {
     openAverage: number;
     fistAverage: number;
@@ -304,6 +316,7 @@ export interface SessionResult {
   failedAttempts: number;
   accuracy: number;
   timeTakenSeconds: number;
+  gameMetrics?: Record<string, unknown>;
   inputMode: InputMode;
   weakestFinger?: FingerName;
   painBefore: CheckIn;

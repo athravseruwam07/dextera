@@ -33,7 +33,7 @@ const BONE_GROUPS: Record<FingerName, string[]> = {
   thumb: ["Bone001", "Bone002", "Bone003"],
   index: ["IndexRoot", "IndexF_lower", "IndexF_middle", "IndexF_tip"],
   middle: ["MiddleF_lower", "MiddleF_middle", "MiddleF_tip"],
-  ring: ["RingRoot", "RingF_lower", "RingF_middle", "RingF_tip"],
+  ring: ["RingF_lower", "RingF_middle", "RingF_tip"],
   pinky: ["PinkyRoot", "PinkyF_lower", "PinkyF_middle", "PinkyF_tip"]
 };
 

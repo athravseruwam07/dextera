@@ -2012,6 +2012,7 @@ th {
 
 .patient-experience .patient-flow-page .surface.cal-hero-card,
 .patient-experience .patient-flow-page .surface.cal-finger-panel,
+.patient-experience .patient-flow-page .surface.cal-live-panel,
 .patient-experience .patient-flow-page .surface.checkin-sheet {
   border: none;
   box-shadow:
@@ -2407,6 +2408,250 @@ th {
   text-align: center;
   padding: 0.25rem 0.5rem;
   color: #0f766e;
+}
+
+.calibration-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: clamp(1rem, 4vw, 2rem);
+  background:
+    radial-gradient(circle at 50% 24%, rgba(59, 130, 246, 0.2), transparent 36%),
+    rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(8px);
+  animation: calibrationBackdropIn 180ms ease-out both;
+}
+
+.calibration-modal-card {
+  position: relative;
+  overflow: hidden;
+  width: min(100%, 520px);
+  display: grid;
+  gap: 0.9rem;
+  padding: clamp(1rem, 3vw, 1.35rem);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 20% -10%, rgba(125, 211, 252, 0.22), transparent 42%),
+    linear-gradient(165deg, #ffffff 0%, #f6fbff 100%);
+  border: 1px solid rgba(219, 234, 254, 0.9);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.92) inset,
+    0 32px 80px rgba(15, 23, 42, 0.28);
+  animation: calibrationModalIn 240ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.calibration-modal-card--captured {
+  background:
+    radial-gradient(circle at 20% -10%, rgba(45, 212, 191, 0.2), transparent 42%),
+    linear-gradient(165deg, #ffffff 0%, #f0fdfa 100%);
+}
+
+.calibration-modal-card--retry {
+  background:
+    radial-gradient(circle at 20% -10%, rgba(251, 191, 36, 0.2), transparent 42%),
+    linear-gradient(165deg, #ffffff 0%, #fffaf0 100%);
+}
+
+.calibration-modal-orbit {
+  position: absolute;
+  inset: auto -38px -56px auto;
+  width: 160px;
+  height: 160px;
+  pointer-events: none;
+  opacity: 0.36;
+}
+
+.calibration-modal-orbit span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  animation: calibrationOrbit 3.2s linear infinite;
+}
+
+.calibration-modal-orbit span:nth-child(2) {
+  inset: 22px;
+  animation-duration: 4.4s;
+  animation-direction: reverse;
+}
+
+.calibration-modal-orbit span:nth-child(3) {
+  inset: 44px;
+  animation-duration: 2.7s;
+}
+
+.calibration-modal-head {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.calibration-modal-state {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: #1e40af;
+  background: linear-gradient(145deg, #dbeafe, #eff6ff);
+  border: 1px solid rgba(96, 165, 250, 0.42);
+  font-size: 0.82rem;
+  font-weight: 900;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.12);
+}
+
+.calibration-modal-state--captured,
+.calibration-modal-state--complete {
+  color: #047857;
+  background: linear-gradient(145deg, #ccfbf1, #ecfdf5);
+  border-color: rgba(20, 184, 166, 0.36);
+}
+
+.calibration-modal-state--retry {
+  color: #92400e;
+  background: linear-gradient(145deg, #fef3c7, #fff7ed);
+  border-color: rgba(245, 158, 11, 0.36);
+}
+
+.calibration-modal-eyebrow {
+  margin: 0 0 0.18rem;
+  font-size: 0.74rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.calibration-modal-head h3 {
+  margin: 0;
+  font-size: clamp(1.25rem, 3.8vw, 1.8rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.calibration-modal-copy {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  color: #526479;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.calibration-modal-preview {
+  position: relative;
+  z-index: 1;
+  border-radius: 18px;
+  padding: 0.35rem;
+  background: rgba(15, 23, 42, 0.08);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.1);
+}
+
+.calibration-modal-hold {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: center;
+}
+
+.calibration-modal-ring {
+  --cal-hold: 0%;
+  width: 74px;
+  height: 74px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, #fff 0 56%, transparent 57%),
+    conic-gradient(#2563eb var(--cal-hold), rgba(226, 232, 240, 0.9) 0);
+  box-shadow: 0 10px 26px rgba(37, 99, 235, 0.15);
+}
+
+.calibration-modal-ring span {
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: #1e40af;
+}
+
+.calibration-modal-quality,
+.calibration-modal-footnote {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  border-radius: 14px;
+  padding: 0.66rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.calibration-modal-quality.is-ok {
+  color: #047857;
+  background: rgba(209, 250, 229, 0.75);
+}
+
+.calibration-modal-quality.is-warn,
+.calibration-modal-footnote {
+  color: #92400e;
+  background: rgba(254, 243, 199, 0.78);
+}
+
+.calibration-modal-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.calibration-modal-actions .primary-button,
+.calibration-modal-actions .secondary-button {
+  flex: 1 1 180px;
+  justify-content: center;
+}
+
+@keyframes calibrationBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes calibrationModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes calibrationOrbit {
+  from {
+    transform: rotate(0deg) scaleX(1.15);
+  }
+  to {
+    transform: rotate(360deg) scaleX(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calibration-modal-backdrop,
+  .calibration-modal-card,
+  .calibration-modal-orbit span {
+    animation: none !important;
+  }
 }
 
 .checkin-wellness-svg {
@@ -3903,7 +4148,7 @@ th {
   background: rgba(15, 23, 42, 0.36);
   font-size: 2rem;
   font-weight: 900;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .ball-game-board {
@@ -5418,6 +5663,18 @@ th {
   border-left: 3px solid rgba(99, 102, 241, 0.5);
 }
 
+.bubble-pop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  align-items: center;
+}
+
+.bubble-pop-actions .compact-game-button {
+  min-height: 34px;
+  padding: 0.42rem 0.62rem;
+}
+
 .bubble-pop-meta-chips {
   display: flex;
   flex-wrap: wrap;
@@ -5459,6 +5716,39 @@ th {
   pointer-events: none;
   z-index: 0;
   overflow: hidden;
+}
+
+.bubble-pop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(3px);
+}
+
+.bubble-pop-overlay > div {
+  width: min(100%, 360px);
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.16);
+}
+
+.bubble-pop-overlay h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.bubble-pop-overlay p {
+  margin: 0;
+  color: #526479;
+  line-height: 1.45;
 }
 
 .bubble-pop-bg-drift {

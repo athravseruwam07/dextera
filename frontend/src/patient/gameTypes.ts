@@ -7,6 +7,7 @@ export type GamePlayResult = {
   failedAttempts: number;
   accuracy: number;
   timeTakenSeconds: number;
+  gameMetrics?: Record<string, unknown>;
   /** Highest consecutive correct taps in a row (Finger Tap Piano, etc.). */
   bestStreak?: number;
   weakestFinger?: FingerName;

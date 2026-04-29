@@ -24,7 +24,7 @@ import {
   Sparkles,
   Stethoscope,
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { fingerNames, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
 import type {
   CalibrationData,
@@ -33,7 +33,6 @@ import type {
   FingerName,
   GameId,
   GestureEvent,
-  GestureName,
   PatientCareAppointment,
   PatientCareAssignment,
   Patient,
@@ -41,8 +40,15 @@ import type {
   SessionResult
 } from "../types";
 import { PatientGame, type GamePlayResult, gameIcons } from "./PatientGames";
+import { manifestForGame } from "./gameRegistry";
 import { RehabGameCatalogArt, rehabGameCatalogTagline } from "./RehabGameCatalogArt";
-import { PatientInputProvider, inputModeLabels, tapBends, usePatientInput } from "./input";
+import { PatientInputProvider, inputModeLabels, usePatientInput } from "./input";
+import { averageRawSamples } from "./ballPickupGrip";
+import {
+  assessFingerTapCaptureQuality,
+  buildFingerTapProfiles,
+  type FingerTapCaptureQuality
+} from "./fingerTapInput";
 import { saveCalibration, savePatientSessionResult } from "./patientApi";
 import { Canvas } from "@react-three/fiber";
 import { HandModel3D } from "../vr/components/HandModel3D";
@@ -152,6 +158,30 @@ function averageBend(bends?: FingerBends) {
 }
 
 const CALIBRATION_TOTAL_STEPS = 9;
+const CALIBRATION_HOLD_MS = 3000;
+const CALIBRATION_SAMPLE_WARMUP_MS = 350;
+const CALIBRATION_MIN_UNIQUE_SAMPLES = 6;
+
+type CalibrationSample = {
+  key: string;
+  at: number;
+  values: Record<string, number>;
+};
+
+function rawSampleKey(values: Record<string, number>) {
+  return fingerNames.map((finger) => `${finger}:${Math.round(values[finger] ?? 0)}`).join("|");
+}
+
+function basicCaptureQuality(samples: Array<Record<string, number>>, averaged: FingerBends | null): FingerTapCaptureQuality {
+  return {
+    ok: Boolean(averaged) && samples.length >= CALIBRATION_MIN_UNIQUE_SAMPLES,
+    status: samples.length >= CALIBRATION_MIN_UNIQUE_SAMPLES ? "stable" : "not-enough-samples",
+    message: samples.length >= CALIBRATION_MIN_UNIQUE_SAMPLES ? "Stable calibration shape captured." : "Need more fresh glove frames. Hold steady and try again.",
+    sampleCount: samples.length,
+    signal: averaged ? averageBend(averaged) : 0,
+    stability: 100
+  };
+}
 
 function calibrationCapturedCount(steps: CalibrationData["steps"], fingerTaps: CalibrationData["fingerTaps"]) {
   let n = 0;
@@ -174,6 +204,16 @@ function recommendedCalibrationTarget(
   if (!steps.pinch) return "pinch";
   for (const f of fingerNames) if (!fingerTaps[f]) return f;
   return null;
+}
+
+type CalibrationTarget =
+  | { id: string; kind: "step"; step: keyof CalibrationData["steps"]; label: string }
+  | { id: string; kind: "finger"; finger: FingerName; label: string };
+
+type CalibrationRunPhase = "idle" | "prepare" | "hold" | "captured" | "retry" | "complete";
+
+function calibrationGestureMeta(step: keyof CalibrationData["steps"]) {
+  return CALIBRATION_GESTURES.find((gesture) => gesture.key === step);
 }
 
 function CalibrationGloveHeroArt() {
@@ -337,6 +377,9 @@ export function PatientExperience({
       : "assignmentId" in route
         ? assignments.find((assignment) => assignment.id === route.assignmentId) ?? assignments[0]
         : assignments[0];
+  const selectedGameManifest = selectedAssignment ? manifestForGame(selectedAssignment.gameId) : null;
+  const openFistOnlyInput = selectedAssignment?.gameId === "ball-pickup";
+  const gloveMode = selectedGameManifest?.gloveMode ?? "default";
 
   const routeStep = route.step;
 
@@ -366,6 +409,21 @@ export function PatientExperience({
   const startQuickTestGame = (assignment: PatientCareAssignment) => {
     const open = { thumb: 5, index: 5, middle: 5, ring: 5, pinky: 5 };
     const fist = { thumb: 88, index: 92, middle: 92, ring: 90, pinky: 88 };
+    const rawFromPercent = (percentBends: FingerBends): FingerBends =>
+      fingerNames.reduce<FingerBends>(
+        (acc, finger) => {
+          acc[finger] = Math.round(open[finger] + ((fist[finger] - open[finger]) * percentBends[finger]) / 100);
+          return acc;
+        },
+        { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 }
+      );
+    const fingerTaps = {
+      thumb: rawFromPercent({ thumb: 86, index: 28, middle: 10, ring: 8, pinky: 8 }),
+      index: rawFromPercent({ thumb: 22, index: 88, middle: 30, ring: 10, pinky: 8 }),
+      middle: rawFromPercent({ thumb: 10, index: 28, middle: 90, ring: 34, pinky: 12 }),
+      ring: rawFromPercent({ thumb: 8, index: 12, middle: 42, ring: 88, pinky: 58 }),
+      pinky: rawFromPercent({ thumb: 8, index: 8, middle: 14, ring: 66, pinky: 86 })
+    };
     resetSessionState();
     setCalibration({
       id: `test-calibration-${Date.now()}`,
@@ -379,13 +437,8 @@ export function PatientExperience({
         point: { thumb: 18, index: 8, middle: 68, ring: 72, pinky: 76 },
         pinch: { thumb: 42, index: 45, middle: 18, ring: 16, pinky: 14 }
       },
-      fingerTaps: {
-        thumb: tapBends("thumb"),
-        index: tapBends("index"),
-        middle: tapBends("middle"),
-        ring: tapBends("ring"),
-        pinky: tapBends("pinky")
-      },
+      fingerTaps,
+      fingerTapProfiles: buildFingerTapProfiles(open, fist, fingerTaps),
       thresholds: {
         openAverage: averageBend(open),
         fistAverage: averageBend(fist),
@@ -414,6 +467,7 @@ export function PatientExperience({
       failedAttempts: gameResult.failedAttempts,
       accuracy: gameResult.accuracy,
       timeTakenSeconds: gameResult.timeTakenSeconds,
+      gameMetrics: gameResult.gameMetrics,
       inputMode: calibration?.inputMode ?? "glove",
       weakestFinger,
       painBefore: preCheck,
@@ -608,6 +662,9 @@ export function PatientExperience({
     <PatientInputProvider
       patientId={patient.id}
       smartGloveEvent={currentEvent}
+      calibration={calibration}
+      openFistOnly={openFistOnlyInput}
+      gloveMode={gloveMode}
       sessionId={"assignmentId" in route ? route.assignmentId : undefined}
       slowMode={accessibilityMode}
     >
@@ -1195,19 +1252,183 @@ function CalibrationScreen({
   const input = usePatientInput();
   const [steps, setSteps] = useState<CalibrationData["steps"]>({});
   const [fingerTaps, setFingerTaps] = useState<CalibrationData["fingerTaps"]>({});
-  const ready =
-    steps.open &&
-    steps.fist &&
-    steps.point &&
-    steps.pinch &&
-    fingerNames.every((finger) => fingerTaps[finger]);
+  const [calibrationPhase, setCalibrationPhase] = useState<CalibrationRunPhase>("idle");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [holdStartedAt, setHoldStartedAt] = useState<number | null>(null);
+  const [holdProgressMs, setHoldProgressMs] = useState(0);
+  const [qualityByTarget, setQualityByTarget] = useState<Record<string, FingerTapCaptureQuality>>({});
+  const [activeQuality, setActiveQuality] = useState<FingerTapCaptureQuality | null>(null);
+  const [feedbackTarget, setFeedbackTarget] = useState<CalibrationTarget | null>(null);
+  const activeSamplesRef = useRef<CalibrationSample[]>([]);
+  const sampleKeysRef = useRef<Set<string>>(new Set());
+  const isBallPickup = assignment.gameId === "ball-pickup";
+  const isFingerTap = assignment.gameId === "finger-tap-piano";
+  const isBubblePop = assignment.gameId === "bubble-pop";
+  const calibrationTargets = useMemo<CalibrationTarget[]>(() => {
+    const targetSteps = isBubblePop
+      ? (["open", "fist", "point", "pinch"] as Array<keyof CalibrationData["steps"]>)
+      : isBallPickup || isFingerTap || assignment.gameId === "carrom-flick"
+      ? (["open", "fist"] as Array<keyof CalibrationData["steps"]>)
+      : (["open", "fist"] as Array<keyof CalibrationData["steps"]>);
+    return [
+      ...targetSteps.map((step) => ({
+        id: step,
+        kind: "step" as const,
+        step,
+        label: calibrationGestureMeta(step)?.label ?? step
+      })),
+      ...(isFingerTap
+        ? fingerNames.map((finger) => ({
+            id: `tap-${finger}`,
+            kind: "finger" as const,
+            finger,
+            label: `${fingerLabels[finger]} tap`
+          }))
+        : [])
+    ];
+  }, [assignment.gameId, isBallPickup, isBubblePop, isFingerTap]);
+  const requiredSteps = calibrationTargets.length;
+  const hasFreshRaw = input.rawConnected && Date.now() - input.lastRawAt <= 1800 && input.rawSamples.length > 0;
+  const ready = calibrationTargets.every((target) =>
+    target.kind === "step" ? Boolean(steps[target.step]) : Boolean(fingerTaps[target.finger])
+  );
 
-  const capture = (step: keyof CalibrationData["steps"]) => {
-    setSteps((items) => ({ ...items, [step]: input.fingerBends }));
-    if (accessibilityMode) speak(`${step} captured`);
+  const activeTarget = calibrationTargets[activeIndex] ?? null;
+  const calibrationRunning = calibrationPhase !== "idle" && calibrationPhase !== "complete";
+  const modalTarget = calibrationPhase === "captured" && feedbackTarget ? feedbackTarget : activeTarget;
+  const activeInstruction = activeTarget
+    ? activeTarget.kind === "step"
+      ? activeTarget.step === "open"
+        ? "Hold your hand open and relaxed."
+        : activeTarget.step === "fist"
+          ? "Close into a comfortable fist and hold."
+          : activeTarget.step === "point"
+            ? "Point with your index finger and hold."
+            : "Pinch thumb and index lightly and hold."
+      : `Tap and hold ${activeTarget.label.replace(" tap", "")}.`
+    : ready
+      ? "Calibration complete."
+      : "Start calibration when the glove is ready.";
+
+  const captureTarget = (target: CalibrationTarget, values: FingerBends) => {
+    if (target.kind === "step") {
+      setSteps((items) => ({ ...items, [target.step]: values }));
+      if (accessibilityMode) speak(`${target.label} captured`);
+      return;
+    }
+    setFingerTaps((items) => ({ ...items, [target.finger]: values }));
+    if (accessibilityMode) speak(`${target.label} captured`);
+  };
+
+  const resetActiveHold = () => {
+    setHoldStartedAt(null);
+    setHoldProgressMs(0);
+    activeSamplesRef.current = [];
+    sampleKeysRef.current = new Set();
+  };
+
+  useEffect(() => {
+    if (calibrationPhase !== "hold" || !activeTarget) return undefined;
+    if (!hasFreshRaw) {
+      resetActiveHold();
+      return undefined;
+    }
+
+    if (holdStartedAt === null) {
+      const now = Date.now();
+      setHoldStartedAt(now);
+      setHoldProgressMs(0);
+      activeSamplesRef.current = [];
+      sampleKeysRef.current = new Set();
+    }
+
+    const tick = window.setInterval(() => {
+      const startedAt = holdStartedAt ?? Date.now();
+      const now = Date.now();
+      const elapsed = Math.min(now - startedAt, CALIBRATION_HOLD_MS);
+      setHoldProgressMs(elapsed);
+      if (input.rawValues && now - startedAt >= CALIBRATION_SAMPLE_WARMUP_MS) {
+        const key = `${input.lastRawAt}:${rawSampleKey(input.rawValues)}`;
+        if (!sampleKeysRef.current.has(key)) {
+          sampleKeysRef.current.add(key);
+          activeSamplesRef.current = [{ key, at: now, values: input.rawValues }, ...activeSamplesRef.current].slice(0, 36);
+        }
+      }
+
+      if (elapsed >= CALIBRATION_HOLD_MS) {
+        const freshSamples = activeSamplesRef.current.map((sample) => sample.values);
+        const averaged = averageRawSamples(freshSamples);
+        const quality =
+          activeTarget.kind === "finger"
+            ? assessFingerTapCaptureQuality({
+                finger: activeTarget.finger,
+                samples: freshSamples,
+                averaged,
+                open: steps.open,
+                closed: steps.fist,
+                existingFingerTaps: fingerTaps
+              })
+            : basicCaptureQuality(freshSamples, averaged);
+        setActiveQuality(quality);
+
+        if (!averaged || !quality.ok) {
+          setQualityByTarget((items) => ({ ...items, [activeTarget.id]: quality }));
+          setFeedbackTarget(activeTarget);
+          resetActiveHold();
+          setCalibrationPhase("retry");
+          return;
+        }
+
+        captureTarget(activeTarget, averaged);
+        setQualityByTarget((items) => ({ ...items, [activeTarget.id]: quality }));
+        const nextIndex = activeIndex + 1;
+        setFeedbackTarget(activeTarget);
+        setActiveIndex(nextIndex);
+        resetActiveHold();
+        if (nextIndex >= calibrationTargets.length) {
+          setCalibrationPhase("complete");
+        } else {
+          setCalibrationPhase("captured");
+        }
+      }
+    }, 80);
+
+    return () => window.clearInterval(tick);
+  }, [activeIndex, activeTarget, calibrationPhase, calibrationTargets.length, fingerTaps, hasFreshRaw, holdStartedAt, input.lastRawAt, input.rawValues, steps.fist, steps.open]);
+
+  const startCalibration = () => {
+    setSteps({});
+    setFingerTaps({});
+    setQualityByTarget({});
+    setActiveQuality(null);
+    setFeedbackTarget(null);
+    setActiveIndex(0);
+    setHoldStartedAt(null);
+    setHoldProgressMs(0);
+    activeSamplesRef.current = [];
+    sampleKeysRef.current = new Set();
+    setCalibrationPhase("prepare");
+    if (accessibilityMode) speak("Calibration started");
+  };
+
+  const beginCurrentHold = () => {
+    if (!activeTarget || !hasFreshRaw) return;
+    setActiveQuality(null);
+    setFeedbackTarget(null);
+    resetActiveHold();
+    setCalibrationPhase("hold");
+    if (accessibilityMode) speak(`Hold ${activeTarget.label}`);
+  };
+
+  const prepareNextTarget = () => {
+    setActiveQuality(null);
+    setFeedbackTarget(null);
+    resetActiveHold();
+    setCalibrationPhase("prepare");
   };
 
   const finish = () => {
+    const fingerTapProfiles = buildFingerTapProfiles(steps.open, steps.fist, fingerTaps);
     const calibration: CalibrationData = {
       id: `calibration-${Date.now()}`,
       patientId: assignment.patientId,
@@ -1216,10 +1437,11 @@ function CalibrationScreen({
       completedAt: new Date().toISOString(),
       steps,
       fingerTaps,
+      fingerTapProfiles,
       thresholds: {
         openAverage: averageBend(steps.open),
         fistAverage: averageBend(steps.fist),
-        pinchIndexGap: Math.abs((steps.pinch?.thumb ?? 0) - (steps.pinch?.index ?? 0))
+        pinchIndexGap: steps.pinch ? Math.abs(steps.pinch.thumb - steps.pinch.index) : 0
       }
     };
     if (steps.open && steps.fist) {
@@ -1228,9 +1450,33 @@ function CalibrationScreen({
     onComplete(calibration);
   };
 
-  const nextTarget = recommendedCalibrationTarget(steps, fingerTaps);
-  const capturedCount = calibrationCapturedCount(steps, fingerTaps);
-  const progressPct = Math.round((capturedCount / CALIBRATION_TOTAL_STEPS) * 100);
+  const capturedCount = calibrationTargets.reduce(
+    (sum, target) => sum + (target.kind === "step" ? Number(Boolean(steps[target.step])) : Number(Boolean(fingerTaps[target.finger]))),
+    0
+  );
+  const progressPct = Math.round((capturedCount / requiredSteps) * 100);
+  const holdPct = Math.round((holdProgressMs / CALIBRATION_HOLD_MS) * 100);
+  const remainingHoldSeconds = Math.ceil(Math.max(CALIBRATION_HOLD_MS - holdProgressMs, 0) / 1000);
+  const modalTitle =
+    calibrationPhase === "complete"
+      ? "Calibration Complete"
+      : calibrationPhase === "captured"
+        ? "Captured"
+        : calibrationPhase === "retry"
+          ? "Try Again"
+          : modalTarget?.label ?? "Calibration";
+  const modalCopy =
+    calibrationPhase === "complete"
+      ? "All required glove positions are captured. You can continue when ready."
+      : calibrationPhase === "captured"
+        ? `${feedbackTarget?.label ?? "Step"} captured. Relax your hand before the next prompt.`
+        : calibrationPhase === "retry"
+          ? activeQuality?.message ?? "The glove did not get a stable capture. Relax, then try the same prompt again."
+          : calibrationPhase === "hold"
+            ? activeInstruction
+            : modalTarget
+              ? `Next: ${activeInstruction}`
+              : "Start calibration when the glove is ready.";
 
   return (
     <section className="page-stack patient-flow-page patient-calibration-page">
@@ -1242,13 +1488,12 @@ function CalibrationScreen({
             <div className="cal-hero-kicker">
               <span className="eyebrow">Calibration · Smart glove</span>
               <span className="cal-hero-steps-pill">
-                <Activity size={14} aria-hidden strokeWidth={2.25} /> {capturedCount}/{CALIBRATION_TOTAL_STEPS} captured
+                <Activity size={14} aria-hidden strokeWidth={2.25} /> {capturedCount}/{requiredSteps} captured
               </span>
             </div>
             <h2 className="cal-hero-title">Set Up the Smart Glove</h2>
             <p className="cal-hero-copy">
-              We capture relaxed open, fist, point, pinch, and one tap per finger so games grade movement against{' '}
-              <em>your</em> glove range — not generic defaults.
+              Start calibration, then hold each prompted shape for 3 seconds. The live hand view stays active while the glove records your raw range.
             </p>
             <div className="cal-progress-shell" aria-label="Calibration completion">
               <div className="cal-progress-bar-wrap">
@@ -1257,8 +1502,8 @@ function CalibrationScreen({
                   role="progressbar"
                   aria-valuenow={capturedCount}
                   aria-valuemin={0}
-                  aria-valuemax={CALIBRATION_TOTAL_STEPS}
-                  aria-valuetext={`${capturedCount} of ${CALIBRATION_TOTAL_STEPS} steps`}
+                  aria-valuemax={requiredSteps}
+                  aria-valuetext={`${capturedCount} of ${requiredSteps} steps`}
                 >
                   <div className="cal-progress-bar-fill" style={{ width: `${progressPct}%` }} />
                 </div>
@@ -1278,115 +1523,158 @@ function CalibrationScreen({
               <HandModel3D bends={input.fingerBends} />
             </Canvas>
             <p style={{ textAlign: "center", fontSize: "0.72rem", color: "var(--text-muted, #64748b)", marginTop: "0.35rem" }}>
-              Live glove preview — bend your fingers
+              Live glove preview — follow the active prompt
             </p>
           </div>
         </header>
 
-        <div className="cal-gesture-grid">
-          {CALIBRATION_GESTURES.map(({ key: stepKey, label, hint, Icon, palette }) => {
-            const captured = Boolean(steps[stepKey]);
-            const isNext = nextTarget === stepKey;
-            return (
-              <article
-                key={stepKey}
-                className={[
-                  "cal-gesture-card",
-                  `cal-gesture-card--${palette}`,
-                  captured ? "is-captured" : "",
-                  isNext ? "is-next" : "",
-                  captured ? "" : "is-pending"
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                <div className="cal-gesture-card__head">
-                  <span className="cal-gesture-icon" aria-hidden>
-                    <Icon size={20} strokeWidth={2} />
-                  </span>
-                  <div className="cal-gesture-card__titles">
-                    <h3>{label}</h3>
-                    <span className={`cal-status ${captured ? "cal-status--ok" : isNext ? "cal-status--next" : "cal-status--muted"}`}>
-                      {captured ? (
-                        <>
-                          <CheckCircle2 size={13} aria-hidden strokeWidth={2.25} /> Captured
-                        </>
-                      ) : isNext ? (
-                        <>Active · next capture</>
-                      ) : (
-                        <>Not captured</>
-                      )}
-                    </span>
-                  </div>
-                </div>
-                <p className="cal-gesture-hint">{hint}</p>
-                {captured && <p className="cal-gesture-measure">{averageBend(steps[stepKey])}% avg bend</p>}
-                <button type="button" className="cal-gesture-capture" onClick={() => capture(stepKey)}>
-                  {captured ? "Recapture" : "Capture"}
-                </button>
-              </article>
-            );
-          })}
-        </div>
-
-        <section className="surface cal-finger-panel" aria-labelledby="cal-finger-heading">
+        <section className="surface cal-live-panel" aria-labelledby="cal-live-heading">
           <div className="cal-finger-panel__intro">
             <div>
-              <h3 id="cal-finger-heading">Tap each finger</h3>
-              <p>Lightly tap once per finger — the glove records your tap signature.</p>
+              <h3 id="cal-live-heading">{activeTarget ? activeTarget.label : "Ready to calibrate"}</h3>
+              <p>{activeInstruction}</p>
             </div>
-            <span className={`cal-status ${fingerNames.every((f) => fingerTaps[f]) ? "cal-status--ok" : ""}`}>
-              {fingerNames.filter((f) => fingerTaps[f]).length}/{fingerNames.length} fingers
+            <span className={`cal-status ${hasFreshRaw ? "cal-status--ok" : "cal-status--muted"}`}>
+              {hasFreshRaw ? "Live glove" : "Waiting for glove"}
             </span>
           </div>
+          <div className="cal-progress-shell" aria-label="Current calibration hold">
+            <div className="cal-progress-bar-wrap">
+              <div className="cal-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={CALIBRATION_HOLD_MS} aria-valuenow={holdProgressMs}>
+                <div className="cal-progress-bar-fill" style={{ width: `${holdPct}%` }} />
+              </div>
+            </div>
+            <span className="cal-progress-chip">
+              {calibrationPhase === "hold" ? `${remainingHoldSeconds}s hold` : ready ? "Complete" : calibrationPhase === "captured" ? "Rest before next" : "Not holding"}
+            </span>
+          </div>
+          {activeQuality ? (
+            <p className={`safe-note ${activeQuality.ok ? "cal-quality-note--ok" : "cal-quality-note--warn"}`}>
+              {activeQuality.message} Samples {activeQuality.sampleCount} · signal {Math.round(activeQuality.signal)} · stability {Math.round(activeQuality.stability)}
+            </p>
+          ) : null}
+
           <div className="cal-finger-strip" role="list">
-            {fingerNames.map((finger, fi) => {
-              const tapped = Boolean(fingerTaps[finger]);
-              const fingerNext = nextTarget === finger;
+            {calibrationTargets.map((target, index) => {
+              const captured = target.kind === "step" ? Boolean(steps[target.step]) : Boolean(fingerTaps[target.finger]);
+              const active = calibrationPhase !== "idle" && index === activeIndex;
+              const quality = qualityByTarget[target.id];
               return (
-                <button
-                  type="button"
-                  key={finger}
-                  role="listitem"
-                  className={[
-                    "cal-finger-pill",
-                    tapped ? "is-captured" : "",
-                    fingerNext ? "is-next" : "",
-                    tapped ? "" : "is-pending"
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  onClick={() => {
-                    const gesture = `tap_${finger}` as GestureName;
-                    const event = input.emitGesture(gesture, tapBends(finger));
-                    setFingerTaps((items) => ({
-                      ...items,
-                      [finger]: {
-                        thumb: event.thumb,
-                        index: event.index,
-                        middle: event.middle,
-                        ring: event.ring,
-                        pinky: event.pinky
-                      }
-                    }));
-                    if (accessibilityMode) speak(`${fingerLabels[finger]} tap captured`);
-                  }}
-                >
-                  <span className="cal-finger-pill__ix" aria-hidden>
-                    {fi + 1}
-                  </span>
-                  <span className="cal-finger-pill__name">{fingerLabels[finger]}</span>
-                  <span className="cal-finger-pill__state">{tapped ? "Captured" : fingerNext ? "Next" : "Tap"}</span>
-                  {tapped ? <CheckCircle2 className="cal-finger-pill__check" size={14} aria-hidden strokeWidth={2.5} /> : null}
-                </button>
+                <div key={target.id} role="listitem" className={["cal-finger-pill", captured ? "is-captured" : "", active ? "is-next" : "", captured ? "" : "is-pending"].filter(Boolean).join(" ")}>
+                  <span className="cal-finger-pill__ix" aria-hidden>{index + 1}</span>
+                  <span className="cal-finger-pill__name">{target.label}</span>
+                  <span className="cal-finger-pill__state">{captured ? "Captured" : active ? "Hold" : quality && !quality.ok ? "Retry" : "Queued"}</span>
+                  {captured ? <CheckCircle2 className="cal-finger-pill__check" size={14} aria-hidden strokeWidth={2.5} /> : null}
+                </div>
               );
             })}
           </div>
+
+          <button type="button" className="primary-button patient-flow-cta patient-flow-primary" disabled={calibrationRunning || !hasFreshRaw} onClick={startCalibration}>
+            {ready ? "Restart Calibration" : "Start Calibration"}
+          </button>
         </section>
+
+        {calibrationPhase !== "idle" ? (
+          <div className="calibration-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="calibration-modal-title">
+            <div className={`calibration-modal-card calibration-modal-card--${calibrationPhase}`}>
+              <div className="calibration-modal-orbit" aria-hidden>
+                <span />
+                <span />
+                <span />
+              </div>
+              <div className="calibration-modal-head">
+                <span className={`calibration-modal-state calibration-modal-state--${calibrationPhase}`}>
+                  {calibrationPhase === "hold"
+                    ? `${remainingHoldSeconds}s`
+                    : calibrationPhase === "captured"
+                      ? "Rest"
+                      : calibrationPhase === "retry"
+                        ? "Retry"
+                        : calibrationPhase === "complete"
+                          ? "Done"
+                          : "Ready"}
+                </span>
+                <div>
+                  <p className="calibration-modal-eyebrow">
+                    Step {Math.min(activeIndex + 1, requiredSteps)} of {requiredSteps}
+                  </p>
+                  <h3 id="calibration-modal-title">{modalTitle}</h3>
+                </div>
+              </div>
+              <p className="calibration-modal-copy">{modalCopy}</p>
+
+              <div className="calibration-modal-preview">
+                <Canvas
+                  style={{ height: 190, width: "100%", borderRadius: 16, background: "#1e293b" }}
+                  camera={{ position: [0, 0.15, 1.4], fov: 50 }}
+                >
+                  <ambientLight intensity={0.9} />
+                  <directionalLight position={[3, 5, 2]} intensity={1.4} />
+                  <HandModel3D bends={input.fingerBends} />
+                </Canvas>
+              </div>
+
+              {calibrationPhase === "hold" ? (
+                <div className="calibration-modal-hold">
+                  <div className="calibration-modal-ring" style={{ ["--cal-hold" as string]: `${holdPct}%` }}>
+                    <span>{holdPct}%</span>
+                  </div>
+                  <div className="cal-progress-shell" aria-label="Modal calibration hold">
+                    <div className="cal-progress-bar-wrap">
+                      <div className="cal-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={CALIBRATION_HOLD_MS} aria-valuenow={holdProgressMs}>
+                        <div className="cal-progress-bar-fill" style={{ width: `${holdPct}%` }} />
+                      </div>
+                    </div>
+                    <span className="cal-progress-chip">Keep holding until the ring fills.</span>
+                  </div>
+                </div>
+              ) : null}
+
+              {activeQuality && (calibrationPhase === "retry" || calibrationPhase === "captured") ? (
+                <p className={`calibration-modal-quality ${activeQuality.ok ? "is-ok" : "is-warn"}`}>
+                  Samples {activeQuality.sampleCount} · signal {Math.round(activeQuality.signal)} · stability {Math.round(activeQuality.stability)}
+                </p>
+              ) : null}
+
+              <div className="calibration-modal-actions">
+                {calibrationPhase === "prepare" ? (
+                  <button type="button" className="primary-button patient-flow-primary" disabled={!hasFreshRaw} onClick={beginCurrentHold}>
+                    Begin 3s Hold
+                  </button>
+                ) : null}
+                {calibrationPhase === "captured" ? (
+                  <button type="button" className="primary-button patient-flow-primary" onClick={prepareNextTarget}>
+                    Next Prompt
+                  </button>
+                ) : null}
+                {calibrationPhase === "retry" ? (
+                  <button type="button" className="primary-button patient-flow-primary" disabled={!hasFreshRaw} onClick={beginCurrentHold}>
+                    Retry Hold
+                  </button>
+                ) : null}
+                {calibrationPhase === "complete" ? (
+                  <button type="button" className="primary-button patient-flow-primary" onClick={() => setCalibrationPhase("idle")}>
+                    Review and Continue
+                  </button>
+                ) : null}
+                {calibrationPhase !== "hold" && calibrationPhase !== "complete" ? (
+                  <button type="button" className="secondary-button" onClick={() => setCalibrationPhase("idle")}>
+                    Pause Calibration
+                  </button>
+                ) : null}
+              </div>
+
+              {!hasFreshRaw && calibrationPhase !== "complete" ? (
+                <p className="calibration-modal-footnote">Waiting for fresh raw glove frames from the ESP32 bridge.</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {!ready && (
           <p className="cal-footer-hint safe-note">
-            Capture every gesture and finger so we can personalize feedback before you train.
+            {hasFreshRaw ? "Press Start Calibration and follow each 3-second prompt." : "Waiting for fresh raw glove frames from the ESP32 bridge."}
           </p>
         )}
 

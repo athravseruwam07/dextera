@@ -13,19 +13,20 @@ import {
   useState
 } from "react";
 import { PatientGameFullscreenContext, type PatientGameFullscreenControls } from "./patientGameFullscreenContext";
-import { CheckCircle2, CircleDot, Crosshair, Maximize2, Minimize2, Music2, Sparkles, Trophy } from "lucide-react";
+import { CheckCircle2, CircleDot, Crosshair, Maximize2, Minimize2, Music2, Sparkles, Trophy, Volume2, VolumeX } from "lucide-react";
 import { Box3, DoubleSide, Group, Mesh, Vector3 } from "three";
 import carromBoardModelUrl from "../assets/carrom_board_optimized.glb?url";
 import { fingerNames, gestureLabels, gestureTargets, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
 import type { FingerName, GameId, GestureEvent, GestureName, HandPosition, PatientCareAssignment } from "../types";
 import {
   emitFingerTap,
-  ManualGestureControls,
   usePatientInput
 } from "./input";
 import { useFullscreen } from "../lib/useFullscreen";
 import type { GamePlayResult } from "./gameTypes";
 import { FingerTapPianoLanesGame } from "./FingerTapPianoLanes";
+import { ballPickupGripAction } from "./ballPickupGrip";
+import { loadPianoMuted, playPianoSound, storePianoMuted, unlockPianoAudio } from "./pianoAudio";
 
 export type { GamePlayResult } from "./gameTypes";
 
@@ -379,13 +380,6 @@ export function PatientGame({
           />
         </div>
 
-        {!completionResult && (
-          <details className="advanced-controls">
-            <summary>Advanced</summary>
-            <ManualGestureControls />
-          </details>
-        )}
-
         {completionResult && (
           <GameCompletionCelebration
             assignment={assignment}
@@ -435,12 +429,12 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
-  const processedEventRef = useRef("");
-  const previousGestureRef = useRef(input.currentGesture);
   const ballSpawnIndexRef = useRef(0);
   const ballPositionRef = useRef<Vec3>(ballSpawns[0]);
   const heldRef = useRef(false);
   const selectedRef = useRef(false);
+  const previousGripRef = useRef<"open" | "fist">("open");
+  const closedAwayFromBallRef = useRef(false);
   const successesRef = useRef(0);
   const failedRef = useRef(0);
   const [ballPosition, setBallPosition] = useState<Vec3>(ballSpawns[0]);
@@ -449,9 +443,11 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   const [successes, setSuccesses] = useState(0);
   const [failed, setFailed] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [started, setStarted] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const [paused, setPaused] = useState(false);
   const [successFlash, setSuccessFlash] = useState(false);
-  const [feedback, setFeedback] = useState("Move the hand near the ball. Click and drag to pick it up.");
+  const [feedback, setFeedback] = useState("Move the hand above the ball, then make a fist to pick it up.");
   const targetReps = assignment.config.targetReps;
   const ballRadius = accessibilityMode ? 0.34 : 0.26;
   const basketRadius = accessibilityMode ? 0.98 : 0.68;
@@ -459,7 +455,9 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   const handWorld = handPositionToWorld(input.handPosition);
   const ballDistance = distance3D(handWorld, ballPosition);
   const canReachBall = ballDistance <= grabRadius;
+  const gripGesture: "open" | "fist" = input.currentGesture === "fist" ? "fist" : "open";
   const accuracy = currentAccuracy(successes, failed);
+  const roundActive = started && countdown === 0 && !paused;
 
   useEffect(() => {
     ballPositionRef.current = ballPosition;
@@ -482,13 +480,28 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   }, [failed]);
 
   useEffect(() => {
-    if (paused) return;
+    if (!started || countdown > 0 || paused) return;
     const timer = window.setInterval(() => setElapsedSeconds((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
-  }, [paused]);
+  }, [countdown, paused, started]);
+
+  useEffect(() => {
+    if (!started || countdown <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      setCountdown((value) => {
+        if (value <= 1) {
+          setFeedback("Move the hand above the ball, then make a fist to pick it up.");
+          return 0;
+        }
+        return value - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [countdown, started]);
 
   useEffect(() => {
     function moveByKeyboard(event: KeyboardEvent) {
+      if (!roundActive) return;
       const key = event.key.toLowerCase();
       const direction = {
         x: key === "arrowleft" || key === "a" ? -1 : key === "arrowright" || key === "d" ? 1 : 0,
@@ -506,7 +519,7 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
 
     window.addEventListener("keydown", moveByKeyboard);
     return () => window.removeEventListener("keydown", moveByKeyboard);
-  }, [accessibilityMode, input]);
+  }, [accessibilityMode, input, roundActive]);
 
   useEffect(() => {
     if (held) return;
@@ -516,9 +529,9 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   }, [canReachBall, held, selected]);
 
   useEffect(() => {
-    if (held || selected || !canReachBall) return;
-    setFeedback("Ball is in reach. Click and drag it to the basket.");
-  }, [canReachBall, held, selected]);
+    if (!roundActive || held || selected || !canReachBall || gripGesture === "fist") return;
+    setFeedback("Ball is in reach. Make a fist to pick it up.");
+  }, [canReachBall, gripGesture, held, roundActive, selected]);
 
   const spawnNextBall = () => {
     window.setTimeout(() => {
@@ -555,7 +568,12 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
           failedAttempts: failedRef.current,
           accuracy: currentAccuracy(nextSuccesses, failedRef.current),
           weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
-          events: sessionEvents
+          events: sessionEvents,
+          gameMetrics: {
+            failedDrops: failedRef.current,
+            releaseAccuracy: currentAccuracy(nextSuccesses, failedRef.current),
+            elapsedSeconds
+          }
         });
       } else {
         spawnNextBall();
@@ -574,7 +592,7 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   const grabBallAt = (worldPosition: Vec3) => {
     if (heldRef.current) return false;
     if (distance3D(worldPosition, ballPositionRef.current) > grabRadius) {
-      setFeedback("Move closer to the ball, then click and drag.");
+      setFeedback("Move the hand above the ball, then make a fist.");
       return false;
     }
 
@@ -582,7 +600,7 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
     heldRef.current = true;
     setSelected(true);
     setHeld(true);
-    setFeedback("Grabbed. Drag to the basket and release.");
+    setFeedback("Grabbed. Move to the basket, then open your hand to drop.");
     return true;
   };
 
@@ -596,41 +614,55 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   };
 
   useEffect(() => {
-    if (paused) return;
-    const event = input.events[0];
-    if (!event || processedEventRef.current === event.id) return;
-    processedEventRef.current = event.id;
+    if (!roundActive) return;
+    if (previousGripRef.current === gripGesture) return;
 
-    if (event.gesture === "point") {
-      if (canReachBall) {
-        setSelected(true);
-        setFeedback("Ball selected. Make a fist or pinch to hold it.");
-      } else {
-        setSelected(false);
-        setFeedback("Move closer to the ball before pointing.");
-      }
-    }
+    const previousGrip = previousGripRef.current;
+    previousGripRef.current = gripGesture;
 
-    if ((event.gesture === "fist" || event.gesture === "pinch") && selected && canReachBall && !held) {
+    const action = ballPickupGripAction({
+      previousGrip,
+      nextGrip: gripGesture,
+      canReachBall,
+      held: heldRef.current
+    });
+
+    if (action === "grab") {
+      closedAwayFromBallRef.current = false;
       grabBallAt(handWorld);
+      return;
     }
 
-    if (previousGestureRef.current !== "open" && event.gesture === "open" && held) {
+    if (action === "closed-away") {
+      closedAwayFromBallRef.current = true;
+      setFeedback("Move the hand above the ball, then make a fist.");
+      return;
+    }
+
+    if (action === "release") {
+      closedAwayFromBallRef.current = false;
       releaseBallAt({ x: handWorld.x, y: 0.34, z: handWorld.z });
+      return;
     }
 
-    previousGestureRef.current = event.gesture;
-  }, [
-    basketRadius,
-    canReachBall,
-    handWorld.x,
-    handWorld.z,
-    held,
-    input.events,
-    paused,
-    selected,
-    targetReps
-  ]);
+    if (action === "opened-empty") {
+      closedAwayFromBallRef.current = false;
+      setFeedback(canReachBall ? "Ball is in reach. Make a fist to pick it up." : "Move the hand above the ball, then make a fist.");
+    }
+  }, [canReachBall, gripGesture, handWorld.x, handWorld.z, roundActive]);
+
+  useEffect(() => {
+    if (!roundActive || gripGesture !== "fist" || !held || closedAwayFromBallRef.current) return;
+    setFeedback("Holding. Move to the basket, then open your hand to drop.");
+  }, [gripGesture, held, roundActive]);
+
+  const startRound = () => {
+    previousGripRef.current = gripGesture;
+    setStarted(true);
+    setPaused(false);
+    setCountdown(3);
+    setFeedback("Get ready. Start with a relaxed open hand.");
+  };
 
   const completeNow = () => {
     finish({
@@ -639,7 +671,12 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
       failedAttempts: failed,
       accuracy,
       weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
-      events: sessionEvents
+      events: sessionEvents,
+      gameMetrics: {
+        failedDrops: failed,
+        releaseAccuracy: accuracy,
+        elapsedSeconds
+      }
     });
   };
 
@@ -653,14 +690,19 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
           <span>Fails</span>
           <strong>{elapsedSeconds}s</strong>
           <span>Timer</span>
-          <strong>{gestureLabels[input.currentGesture]}</strong>
+          <strong>{gestureLabels[gripGesture]}</strong>
           <span>Gesture</span>
           <strong>{accuracy}%</strong>
           <span>Accuracy</span>
-          <button type="button" className="secondary-button compact-game-button" onClick={() => setPaused((value) => !value)}>
+          {!started && (
+            <button type="button" className="primary-button compact-game-button" onClick={startRound}>
+              Start
+            </button>
+          )}
+          <button type="button" className="secondary-button compact-game-button" disabled={!started || countdown > 0} onClick={() => setPaused((value) => !value)}>
             {paused ? "Resume" : "Pause"}
           </button>
-          <button type="button" className="danger-button compact-game-button" onClick={completeNow}>
+          <button type="button" className="danger-button compact-game-button" disabled={!started} onClick={completeNow}>
             End Session
           </button>
         </div>
@@ -669,37 +711,8 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
         className="ball-3d-board"
         tabIndex={0}
         onPointerMove={(event) => {
-          if (paused) return;
+          if (!roundActive) return;
           input.setHandPosition(pointerToInputPosition(event));
-        }}
-        onPointerDown={(event) => {
-          if (paused || event.button !== 0) return;
-          const nextPosition = pointerToInputPosition(event);
-          input.setHandPosition(nextPosition);
-          const worldPosition = handPositionToWorld(nextPosition);
-          if (!grabBallAt(worldPosition)) return;
-          event.currentTarget.setPointerCapture(event.pointerId);
-          const pointEvent = input.emitGesture("point", gestureTargets.point, nextPosition);
-          const fistEvent = input.emitGesture("fist", gestureTargets.fist, nextPosition);
-          processedEventRef.current = fistEvent.id || pointEvent.id;
-          event.preventDefault();
-        }}
-        onPointerUp={(event) => {
-          if (paused) return;
-          const nextPosition = pointerToInputPosition(event);
-          input.setHandPosition(nextPosition);
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
-          if (!heldRef.current) return;
-          releaseBallAt({ ...handPositionToWorld(nextPosition), y: 0.34 });
-          const openEvent = input.emitGesture("open", gestureTargets.open, nextPosition);
-          processedEventRef.current = openEvent.id;
-        }}
-        onPointerCancel={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }
         }}
       >
         <Canvas
@@ -712,7 +725,7 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
             ballRadius={ballRadius}
             basketRadius={basketRadius}
             canReachBall={canReachBall}
-            gesture={input.currentGesture}
+            gesture={gripGesture}
             handTarget={handWorld}
             held={held}
             paused={paused}
@@ -720,6 +733,12 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
             successFlash={successFlash}
           />
         </Canvas>
+        {!started && (
+          <div className="ball-3d-overlay">
+            <button type="button" className="primary-button" onClick={startRound}>Start Ball Pickup</button>
+          </div>
+        )}
+        {started && countdown > 0 && <div className="ball-3d-overlay">{countdown}</div>}
         {paused && <div className="ball-3d-overlay">Paused</div>}
       </div>
       <p className="game-feedback">{feedback}</p>
@@ -1173,6 +1192,7 @@ function FingerTapPianoGame({ assignment, accessibilityMode, onComplete }: GameP
 function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
+  const gloveControlsActive = input.rawConnected;
   const preset = useMemo(
     () => fingerTapPianoPreset(assignment, accessibilityMode),
     [assignment, accessibilityMode]
@@ -1194,6 +1214,7 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [holdProgressMs, setHoldProgressMs] = useState(0);
   const [resultSent, setResultSent] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(() => loadPianoMuted());
 
   const processedEventRef = useRef("");
   /** `patient-input-*` taps from demo stream look like taps; only accept those from piano keys (+ real glove IDs). */
@@ -1265,13 +1286,30 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
         timeTakenSeconds,
         bestStreak: snapshot.bestStreak,
         weakestFinger: weakest,
-        events: sessionEvents
+        events: sessionEvents,
+        gameMetrics: {
+          hits: snapshot.hits,
+          misses: snapshot.misses,
+          bestStreak: snapshot.bestStreak,
+          missesByFinger: snapshot.missesByFinger,
+          holdRequiredMs: preset.holdRequiredMs,
+          inputSource: gloveControlsActive ? "glove" : "demo"
+        }
       });
     },
-    [onComplete, resultSent, sessionEvents]
+    [gloveControlsActive, onComplete, preset.holdRequiredMs, resultSent, sessionEvents]
   );
 
+  const toggleSoundMuted = useCallback(() => {
+    setSoundMuted((value) => {
+      const next = !value;
+      storePianoMuted(next);
+      return next;
+    });
+  }, []);
+
   const beginRound = useCallback(() => {
+    void unlockPianoAudio();
     completedRef.current = false;
     setResultSent(false);
     gameStartedAtRef.current = Date.now();
@@ -1417,11 +1455,12 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
   }, [elapsedSeconds, inRest, paused, phase, preset.timeLimitSeconds]);
 
   useEffect(() => {
-    if (phase !== "playing" || paused || inRest || holdRequired) return;
+    if (phase !== "playing" || paused || inRest || (holdRequired && !gloveControlsActive)) return;
     const LOCAL_PREFIX = "patient-input-";
     const localTapCountsForGameplay = (event: GestureEvent) => {
       if (!event.gesture.startsWith("tap_")) return false;
       if (!event.id.startsWith(LOCAL_PREFIX)) return true;
+      if (gloveControlsActive) return false;
       return pianoTrustedLocalTapIdsRef.current.has(event.id);
     };
 
@@ -1449,15 +1488,18 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
 
       if (tapped === play.currentTarget) {
         scheduleFingerPulse(tapped, "correct");
+        playPianoSound(tapped, "correct", soundMuted);
         registerCorrect();
       } else {
         scheduleFingerPulse(tapped, "wrong");
+        playPianoSound(tapped, "wrong", soundMuted);
         registerWrong();
       }
       return;
     }
   }, [
     holdRequired,
+    gloveControlsActive,
     inRest,
     input.events,
     paused,
@@ -1465,7 +1507,8 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
     play.currentTarget,
     registerCorrect,
     registerWrong,
-    scheduleFingerPulse
+    scheduleFingerPulse,
+    soundMuted
   ]);
 
   /** Hold meter + scoring use key press duration only. `input.fingerBends` is driven by the global demo glove stream and jittered wildly, which caused phantom misses, pulses, and rapid advances when hold mode polled bends. */
@@ -1492,13 +1535,14 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
     (finger: FingerName) => {
       if (holdRequired) return;
       if (phase !== "playing" || paused || inRest) return;
+      if (gloveControlsActive) return;
       const now = performance.now();
       if (now - quickTapGuardRef.current < 55) return;
       quickTapGuardRef.current = now;
       const ev = emitFingerTap(finger, input.emitGesture);
       pianoTrustedLocalTapIdsRef.current.add(ev.id);
     },
-    [holdRequired, phase, paused, inRest, input.emitGesture]
+    [gloveControlsActive, holdRequired, phase, paused, inRest, input.emitGesture]
   );
 
   const onKeyPointerUp = (finger: FingerName) => {
@@ -1516,9 +1560,11 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
     const target = targetRef.current;
     if (finger === target) {
       scheduleFingerPulse(finger, "correct");
+      playPianoSound(finger, "correct", soundMuted);
       registerCorrect();
     } else {
       scheduleFingerPulse(finger, "wrong");
+      playPianoSound(finger, "wrong", soundMuted);
       registerWrong();
     }
   };
@@ -1543,7 +1589,7 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
       ? 0
       : clamp((play.hits / Math.max(preset.requiredHits, 1)) * 100, 0, 100);
 
-  const inputModeLabel = accessibilityMode ? "Accessibility" : "Standard";
+  const inputModeLabel = gloveControlsActive ? "Glove connected" : accessibilityMode ? "Accessibility" : "Demo controls";
   const holdModeLabel = holdRequired ? `${preset.holdRequiredMs} ms hold` : "Quick tap";
   const difficultyTitle = difficultyLabel(assignment.config.difficulty);
 
@@ -1584,6 +1630,15 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
           </div>
           {(phase === "idle" || phase === "playing") && (
             <div className="piano-hero__cta">
+              <button
+                type="button"
+                className="secondary-button piano-btn piano-btn--ghost"
+                onClick={toggleSoundMuted}
+                aria-pressed={!soundMuted}
+                aria-label={soundMuted ? "Turn piano sound on" : "Mute piano sound"}
+              >
+                {soundMuted ? <VolumeX size={16} aria-hidden /> : <Volume2 size={16} aria-hidden />}
+              </button>
               {phase === "idle" ? (
                 <button type="button" className="primary-button piano-btn piano-btn--primary" onClick={beginRound}>
                   Start
@@ -1777,7 +1832,7 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
         {phase === "idle" && (
           <ul className="piano-prep-micro" aria-label="Before you begin">
             <li>Tap Start—the board wakes for this round.</li>
-            <li>Only bend or tap the highlighted finger column.</li>
+            <li>{gloveControlsActive ? "Tap the highlighted finger with the glove." : "Only bend or tap the highlighted finger column."}</li>
             <li>Wrong finger adds a miss and clears your streak.</li>
           </ul>
         )}
@@ -1847,6 +1902,7 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
                           if (e.button !== 0) return;
                           if (phase !== "playing" || paused || inRest) return;
                           setKeyboardPressedFinger(finger);
+                          if (gloveControlsActive) return;
                           if (holdRequired) {
                             (e.currentTarget as HTMLButtonElement).setPointerCapture?.(e.pointerId);
                             onKeyPointerDown(finger);
@@ -2099,17 +2155,64 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
   const finish = useCompletion(onComplete);
   const processedEventRef = useRef("");
   const targetReps = assignment.config.targetReps;
+  const initialTime = accessibilityMode ? 75 : 50;
+  const [phase, setPhase] = useState<"ready" | "playing" | "paused">("ready");
   const [bubbles, setBubbles] = useState(() => makeBubbles(1, accessibilityMode));
   const [seed, setSeed] = useState(2);
   const [popped, setPopped] = useState(0);
   const [missed, setMissed] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(accessibilityMode ? 75 : 50);
+  const [timeLeft, setTimeLeft] = useState(initialTime);
   const [tapFx, setTapFx] = useState<Partial<Record<string, "ok" | "bad">>>({});
+  const lastSuccessfulPopAtRef = useRef<number | null>(null);
+  const popIntervalsRef = useRef<number[]>([]);
   const popRadius = accessibilityMode ? 16 : 10;
   /** Half-diameter in normalized 0–100 coords; matches ~clamp(72px, 10vw, 120px) bubbles on typical boards */
   const bubbleHitHalf = accessibilityMode ? 8.25 : 7;
 
   const progressPct = clamp((popped / Math.max(targetReps, 1)) * 100, 0, 100);
+  const gameActive = phase === "playing";
+
+  const resetRound = useCallback(() => {
+    processedEventRef.current = "";
+    lastSuccessfulPopAtRef.current = null;
+    popIntervalsRef.current = [];
+    setSeed(2);
+    setBubbles(makeBubbles(1, accessibilityMode));
+    setPopped(0);
+    setMissed(0);
+    setTimeLeft(initialTime);
+    setTapFx({});
+  }, [accessibilityMode, initialTime]);
+
+  const startRound = useCallback(() => {
+    resetRound();
+    setPhase("playing");
+  }, [resetRound]);
+
+  const finishBubbleRound = useCallback(
+    (nextPopped: number, nextMissed: number) => {
+      const intervals = popIntervalsRef.current;
+      const averagePopIntervalMs = intervals.length
+        ? Math.round(intervals.reduce((sum, value) => sum + value, 0) / intervals.length)
+        : null;
+      finish({
+        repsCompleted: nextPopped,
+        successfulReps: nextPopped,
+        failedAttempts: nextMissed,
+        accuracy: clampPercent((nextPopped / Math.max(nextPopped + nextMissed, 1)) * 100),
+        weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
+        events: sessionEvents,
+        gameMetrics: {
+          popped: nextPopped,
+          wrongHits: nextMissed,
+          timeLeft,
+          averagePopIntervalMs,
+          inputSource: input.rawConnected ? "glove" : "demo"
+        }
+      });
+    },
+    [finish, input.rawConnected, sessionEvents, timeLeft]
+  );
 
   const flashTap = useCallback((bubbleId: string, kind: "ok" | "bad") => {
     setTapFx((prev) => ({ ...prev, [bubbleId]: kind }));
@@ -2124,30 +2227,27 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
 
   const emitPinchFromBubble = useCallback(
     (bubble: { id: string; x: number; y: number; target: boolean }) => {
+      if (!gameActive || input.rawConnected) return;
       flashTap(bubble.id, bubble.target ? "ok" : "bad");
       input.emitGesture("pinch", gestureTargets.pinch, { x: bubble.x, y: bubble.y, z: 0 });
     },
-    [flashTap, input]
+    [flashTap, gameActive, input]
   );
 
   useEffect(() => {
+    if (phase !== "playing") return undefined;
     const timer = window.setInterval(() => setTimeLeft((value) => Math.max(0, value - 1)), 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [phase]);
 
   useEffect(() => {
     if (timeLeft > 0 || popped >= targetReps) return;
-    finish({
-      repsCompleted: popped,
-      successfulReps: popped,
-      failedAttempts: missed,
-      accuracy: clampPercent((popped / Math.max(popped + missed, 1)) * 100),
-      weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
-      events: sessionEvents
-    });
-  }, [finish, missed, popped, sessionEvents, targetReps, timeLeft]);
+    if (phase !== "playing") return;
+    finishBubbleRound(popped, missed);
+  }, [finishBubbleRound, missed, phase, popped, targetReps, timeLeft]);
 
   useEffect(() => {
+    if (phase !== "playing") return;
     const event = input.events[0];
     if (!event || processedEventRef.current === event.id) return;
     if (event.gesture !== "pinch" && event.gesture !== "point") return;
@@ -2170,16 +2270,14 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
 
     if (nearest.target) {
       const nextPopped = popped + 1;
+      const now = Date.now();
+      if (lastSuccessfulPopAtRef.current !== null) {
+        popIntervalsRef.current = [...popIntervalsRef.current, now - lastSuccessfulPopAtRef.current].slice(-40);
+      }
+      lastSuccessfulPopAtRef.current = now;
       setPopped(nextPopped);
       if (nextPopped >= targetReps) {
-        finish({
-          repsCompleted: nextPopped,
-          successfulReps: nextPopped,
-          failedAttempts: missed,
-          accuracy: clampPercent((nextPopped / Math.max(nextPopped + missed, 1)) * 100),
-          weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
-          events: sessionEvents
-        });
+        finishBubbleRound(nextPopped, missed);
       }
     } else {
       setMissed((value) => value + 1);
@@ -2187,17 +2285,38 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
   }, [
     accessibilityMode,
     bubbles,
-    finish,
+    finishBubbleRound,
     input.events,
     input.handPosition,
     missed,
     popRadius,
     popped,
     seed,
-    sessionEvents,
+    phase,
     bubbleHitHalf,
     targetReps
   ]);
+
+  useEffect(() => {
+    if (phase !== "playing") return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const direction = {
+        x: key === "arrowleft" || key === "a" ? -1 : key === "arrowright" || key === "d" ? 1 : 0,
+        y: key === "arrowup" || key === "w" ? -1 : key === "arrowdown" || key === "s" ? 1 : 0
+      };
+      if (!direction.x && !direction.y) return;
+      event.preventDefault();
+      const step = accessibilityMode ? 4 : 6;
+      input.setHandPosition({
+        x: input.handPosition.x + direction.x * step,
+        y: input.handPosition.y + direction.y * step,
+        z: 0
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [accessibilityMode, input, phase]);
 
   return (
     <section className={`bubble-pop-shell${accessibilityMode ? " bubble-pop-shell--accessible" : ""}`} aria-label="Bubble Pop game">
@@ -2228,6 +2347,17 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
               <dd>{timeLeft}s</dd>
             </div>
           </dl>
+          <div className="bubble-pop-actions">
+            {phase === "ready" ? (
+              <button type="button" className="primary-button compact-game-button" onClick={startRound}>Start</button>
+            ) : (
+              <button type="button" className="secondary-button compact-game-button" onClick={() => setPhase((value) => value === "paused" ? "playing" : "paused")}>
+                {phase === "paused" ? "Resume" : "Pause"}
+              </button>
+            )}
+            <button type="button" className="secondary-button compact-game-button" onClick={startRound}>Restart</button>
+            <button type="button" className="danger-button compact-game-button" disabled={phase === "ready"} onClick={() => finishBubbleRound(popped, missed)}>End</button>
+          </div>
         </div>
         <div className="bubble-pop-meta-chips">
           <span className="bubble-meta-chip">Crosshair aim · pinch or tap confirms</span>
@@ -2248,6 +2378,7 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
       <div
         className="bubble-pop-scene bubble-board game-board"
         onPointerMove={(event) => {
+          if (phase !== "playing") return;
           const bounds = event.currentTarget.getBoundingClientRect();
           input.setHandPosition({
             x: ((event.clientX - bounds.left) / bounds.width) * 100,
@@ -2338,6 +2469,23 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
         </div>
 
         <BubblePopAimCursor position={input.handPosition} gesture={input.currentGesture} accessible={accessibilityMode} />
+        {phase === "ready" && (
+          <div className="bubble-pop-overlay">
+            <div>
+              <h3>Ready to Pop</h3>
+              <p>{input.rawConnected ? "Aim with the pointer, then point or pinch with the glove." : "Aim and tap targets for demo mode."}</p>
+              <button type="button" className="primary-button" onClick={startRound}>Start Bubble Pop</button>
+            </div>
+          </div>
+        )}
+        {phase === "paused" && (
+          <div className="bubble-pop-overlay">
+            <div>
+              <h3>Paused</h3>
+              <button type="button" className="primary-button" onClick={() => setPhase("playing")}>Resume</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <p className="bubble-pop-hint-chip" role="note">
@@ -2765,6 +2913,7 @@ function CarromGame({ assignment, accessibilityMode, onComplete }: GameProps) {
   const finish = useCompletion(onComplete);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const processedEventRef = useRef("");
+  const previousCarromGestureRef = useRef<GestureName>("open");
   const shotOwnerRef = useRef<CarromPlayer>("player");
   const movingRef = useRef(false);
   const motionFramesRef = useRef(0);
@@ -3213,6 +3362,22 @@ function CarromGame({ assignment, accessibilityMode, onComplete }: GameProps) {
   }, [aim, input.events, isMoving, pausedForFullscreen, shoot, stage, turn]);
 
   useEffect(() => {
+    const previous = previousCarromGestureRef.current;
+    const current = input.currentGesture;
+    previousCarromGestureRef.current = current;
+    if (
+      stage !== "playing"
+      || turn !== "player"
+      || isMoving
+      || pausedForFullscreen
+      || !playerStrikerPlaced
+      || previous !== "fist"
+      || current !== "open"
+    ) return;
+    shoot("player", aim);
+  }, [aim, input.currentGesture, isMoving, pausedForFullscreen, playerStrikerPlaced, shoot, stage, turn]);
+
+  useEffect(() => {
     if (stage !== "playing" || turn !== "ai") return;
     if (piecesAreMoving(pieces)) return;
     setMessage("AI lining up shot.");
@@ -3242,20 +3407,36 @@ function CarromGame({ assignment, accessibilityMode, onComplete }: GameProps) {
     }, 950);
   }, [assignment.config.difficulty, pieces, queen, stage, startCarromPhysicsShot, striker, turn]);
 
-  const saveResult = () => finish({
-    repsCompleted: shots,
-    successfulReps: playerPocketed,
-    failedAttempts: misses + playerFouls,
-    accuracy: carromAccuracy(playerPocketed, misses, playerFouls),
-    bestStreak: playerPocketed,
-    weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
-    events: sessionEvents
-  });
+  const carromMetrics = carromMetricAggRef.current;
+
+  const saveResult = () => {
+    const metricShots = Math.max(carromMetrics.shots, 1);
+    finish({
+      repsCompleted: shots,
+      successfulReps: playerPocketed,
+      failedAttempts: misses + playerFouls,
+      accuracy: carromAccuracy(playerPocketed, misses, playerFouls),
+      bestStreak: playerPocketed,
+      weakestFinger: sessionEvents.length ? weakestFingerFromEvents(sessionEvents) : undefined,
+      events: sessionEvents,
+      gameMetrics: {
+        playerPocketed,
+        aiPocketed,
+        playerFouls,
+        aiFouls,
+        misses,
+        winner,
+        averageAimJitterDeg: Number(((carromMetrics.aimJitterSum / metricShots) * 180 / Math.PI).toFixed(2)),
+        averagePullConsistency: Math.round((carromMetrics.forceControlSum / metricShots) * 100),
+        averageTimeToAimSec: Number((carromMetrics.timeToAimSumSec / metricShots).toFixed(2)),
+        averageRestPauseSec: Number((carromMetrics.restPauseSumSec / metricShots).toFixed(2))
+      }
+    });
+  };
 
   const canInteract = stage === "playing" && turn === "player" && !isMoving && !pausedForFullscreen;
   const canAim = canInteract && playerStrikerPlaced;
   const queenLabel = queen.status === "available" ? "On board" : queen.status === "pending" ? `${queen.holder === "player" ? "You" : "AI"} cover` : `${queen.holder === "player" ? "You" : "AI"} covered`;
-  const carromMetrics = carromMetricAggRef.current;
 
   return (
     <div

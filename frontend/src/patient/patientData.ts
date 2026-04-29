@@ -29,7 +29,7 @@ export const gameTutorials = {
     title: "Ball Pickup",
     steps: [
       "Open your hand to relax before the rep.",
-      "Point at the ball you want to pick up.",
+      "Move your hand above the ball.",
       "Make a fist to grab the ball.",
       "Move your hand to the basket.",
       "Open your hand to release the ball into the basket."

@@ -6,12 +6,13 @@ import {
   useRef,
   useState
 } from "react";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, Volume2, VolumeX } from "lucide-react";
 import { fingerNames } from "../lib/gesture";
 import type { FingerName, GestureEvent, GestureName, PatientCareAssignment } from "../types";
 import { emitFingerTap, usePatientInput } from "./input";
 import type { GamePlayResult, PatientGameSharedProps as GameProps } from "./gameTypes";
 import { usePatientGameFullscreenControls } from "./patientGameFullscreenContext";
+import { loadPianoMuted, playPianoSound, storePianoMuted, unlockPianoAudio } from "./pianoAudio";
 
 export type FingerTapLanesPreset = {
   requiredHits: number;
@@ -134,6 +135,7 @@ function useSessionEventsSinceMount() {
 export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onComplete }: GameProps) {
   const fullscreen = usePatientGameFullscreenControls();
   const input = usePatientInput();
+  const gloveControlsActive = input.rawConnected;
   const sessionEvents = useSessionEventsSinceMount();
   const preset = useMemo(
     () => fingerTapLanesPreset(assignment, accessibilityMode),
@@ -155,6 +157,7 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
   const [lostByMisses, setLostByMisses] = useState(false);
   const [flash, setFlash] = useState<{ finger: FingerName; kind: "ok" | "bad" } | null>(null);
   const [streakPulse, setStreakPulse] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(() => loadPianoMuted());
 
   const speedRef = useRef(preset.initialSpeed);
   const tilesRef = useRef<FallingTile[]>([]);
@@ -233,10 +236,19 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
       timeTakenSeconds: Math.max(1, Math.round((Date.now() - start) / 1000)),
       bestStreak,
       weakestFinger: weakest,
-      events: sessionEvents
+      events: sessionEvents,
+      gameMetrics: {
+        hits,
+        misses,
+        bestStreak,
+        missByFinger,
+        timedOut,
+        lostByMisses,
+        inputSource: gloveControlsActive ? "glove" : "demo"
+      }
     };
     onComplete(payload);
-  }, [bestStreak, hits, missByFinger, misses, onComplete, sessionEvents]);
+  }, [bestStreak, gloveControlsActive, hits, lostByMisses, missByFinger, misses, onComplete, sessionEvents, timedOut]);
 
   useEffect(() => {
     if (phase !== "playing") return;
@@ -255,7 +267,16 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
     }
   }, [elapsedSeconds, hits, misses, phase, preset.maxMisses, preset.requiredHits, preset.timeLimitSeconds]);
 
+  const toggleSoundMuted = useCallback(() => {
+    setSoundMuted((value) => {
+      const next = !value;
+      storePianoMuted(next);
+      return next;
+    });
+  }, []);
+
   const beginRound = useCallback(() => {
+    void unlockPianoAudio();
     resultSentRef.current = false;
     setResultCommitted(false);
     lastEmittedByFingerRef.current = {};
@@ -327,6 +348,7 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
           return nh;
         });
         scheduleFlash(finger, "ok");
+        playPianoSound(finger, "correct", soundMuted);
         return;
       }
       /** Wrong lane during an active beat in another lane, or sloppy tap timing. */
@@ -336,9 +358,10 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
         setStreak(0);
         setMissByFinger((prev) => ({ ...prev, [finger]: prev[finger] + 1 }));
         scheduleFlash(finger, "bad");
+        playPianoSound(finger, "wrong", soundMuted);
       }
     },
-    [scheduleFlash, speedForHits]
+    [scheduleFlash, soundMuted, speedForHits]
   );
 
   useEffect(() => {
@@ -372,7 +395,10 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
           for (const lane of missed) copy[lane] += 1;
           return copy;
         });
-        if (missed[0]) scheduleFlash(missed[0], "bad");
+        if (missed[0]) {
+          scheduleFlash(missed[0], "bad");
+          playPianoSound(missed[0], "miss", soundMuted);
+        }
       }
 
       spawnAccRef.current += dt * 1000;
@@ -399,7 +425,7 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [paused, phase, pickLane, preset.initialSpeed, scheduleFlash, tileH]);
+  }, [paused, phase, pickLane, preset.initialSpeed, scheduleFlash, soundMuted, tileH]);
 
   useEffect(() => {
     if (phase !== "playing" || paused) return;
@@ -445,6 +471,7 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
   const emitLaneTap = useCallback(
     (finger: FingerName) => {
       if (phaseRef.current !== "playing" || pausedRef.current) return;
+      if (gloveControlsActive) return;
       const now = performance.now();
       const prev = lastEmittedByFingerRef.current[finger];
       if (prev != null && now - prev < 72) return;
@@ -452,7 +479,7 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
       emitFingerTap(finger, input.emitGesture);
       applyResolution(finger);
     },
-    [applyResolution, input.emitGesture]
+    [applyResolution, gloveControlsActive, input.emitGesture]
   );
 
   const onLaneTapPointer = useCallback(
@@ -511,12 +538,21 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
               <span className="piano-hero__dot" aria-hidden>
                 ·
               </span>
-              <span>Falling notes · tap the matching key column</span>
+          <span>{gloveControlsActive ? "Falling notes · tap with the glove" : "Falling notes · tap the matching key column"}</span>
             </p>
           </div>
           <div className="piano-hero__trailing">
             {(phase === "idle" || phase === "playing") && (
               <div className="piano-hero__cta">
+                <button
+                  type="button"
+                  className="secondary-button piano-btn piano-btn--ghost"
+                  onClick={toggleSoundMuted}
+                  aria-pressed={!soundMuted}
+                  aria-label={soundMuted ? "Turn piano sound on" : "Mute piano sound"}
+                >
+                  {soundMuted ? <VolumeX size={16} aria-hidden /> : <Volume2 size={16} aria-hidden />}
+                </button>
                 {phase === "idle" ? (
                   <button type="button" className="primary-button piano-btn piano-btn--primary" onClick={beginRound}>
                     Start round
@@ -669,8 +705,15 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
 
       <div className={`piano-playfield piano-playfield--lanes${phase === "complete" ? " piano-playfield--complete" : ""}`}>
         <p className={`piano-tile-hintbar${phase === "idle" ? "" : " piano-tile-hintbar--dim"}`} role="note">
-          <strong>How to play:</strong> Tap the key when the black tile reaches the cyan strike band. Keys <kbd className="piano-kbd-mini">C</kbd>
-          –<kbd className="piano-kbd-mini">G</kbd>.{" "}
+          <strong>How to play:</strong>{" "}
+          {gloveControlsActive ? (
+            <>Tap the matching finger when the black tile reaches the cyan strike band. </>
+          ) : (
+            <>
+              Tap the key when the black tile reaches the cyan strike band. Keys <kbd className="piano-kbd-mini">C</kbd>
+              –<kbd className="piano-kbd-mini">G</kbd>.{" "}
+            </>
+          )}
           {phase === "idle" ? "Press Start." : null}
         </p>
 
@@ -698,7 +741,7 @@ export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onCompl
                     key={finger}
                     type="button"
                     className={`piano-tile-key piano-key-lane ${flash?.finger === finger ? (flash.kind === "ok" ? "piano-key-lane--hit" : "piano-key-lane--miss") : ""}`}
-                    disabled={phase !== "playing" || paused}
+                    disabled={phase !== "playing" || paused || gloveControlsActive}
                     aria-label={`${LANE_LABEL[finger]} column — tap when a note aligns with target band`}
                     onPointerDown={(e) => onLaneTapPointer(finger, e)}
                     onClick={(e) => {

@@ -8,18 +8,35 @@ import {
   useRef,
   useState
 } from "react";
-import { fingerNames, gestureLabels, gestureTargets, scoreAccuracy } from "../lib/gesture";
-import type { FingerBends, FingerName, GestureEvent, GestureName, HandPosition, InputMode } from "../types";
+import { classifyGesture, gestureLabels, gestureTargets, scoreAccuracy } from "../lib/gesture";
+import { fetchLatestGloveEvent } from "../lib/backend";
+import type { CalibrationData, FingerBends, FingerName, GestureEvent, GestureName, HandPosition, InputMode } from "../types";
+import {
+  calibratedBendsFromRaw,
+  classifyGripFrame,
+  initialGripClassifierState
+} from "./ballPickupGrip";
+import {
+  detectFingerTapsFromBends,
+  detectFingerTapsFromRaw,
+  initialFingerTapDetectorState
+} from "./fingerTapInput";
 
 const modeLabels: Record<InputMode, string> = {
   glove: "Smart Glove"
 };
+
+export type PatientGloveMode = "default" | "raw" | "ball-pickup" | "finger-tap";
 
 type PatientInputContextValue = {
   inputMode: InputMode;
   setInputMode: (mode: InputMode) => void;
   currentGesture: GestureName;
   fingerBends: FingerBends;
+  rawValues: Record<string, number> | null;
+  rawSamples: Array<Record<string, number>>;
+  rawConnected: boolean;
+  lastRawAt: number;
   handPosition: HandPosition;
   events: GestureEvent[];
   emitGesture: (gesture: GestureName, bends?: FingerBends, position?: HandPosition) => GestureEvent;
@@ -89,22 +106,35 @@ export function PatientInputProvider({
   children,
   patientId,
   smartGloveEvent,
+  calibration,
+  openFistOnly = false,
+  gloveMode,
   sessionId,
   slowMode = false
 }: {
   children: ReactNode;
   patientId: string;
   smartGloveEvent?: GestureEvent;
+  calibration?: CalibrationData;
+  openFistOnly?: boolean;
+  gloveMode?: PatientGloveMode;
   sessionId?: string;
   slowMode?: boolean;
 }) {
+  const effectiveGloveMode: PatientGloveMode = gloveMode ?? (openFistOnly ? "ball-pickup" : "default");
   const [inputMode, setInputModeState] = useState<InputMode>(() => loadInputMode());
   const [fingerBends, setFingerBends] = useState<FingerBends>(gestureTargets.open);
+  const [rawValues, setRawValues] = useState<Record<string, number> | null>(null);
+  const [rawSamples, setRawSamples] = useState<Array<Record<string, number>>>([]);
+  const [rawConnected, setRawConnected] = useState(false);
+  const [lastRawAt, setLastRawAt] = useState(0);
   const [currentGesture, setCurrentGesture] = useState<GestureName>("open");
   const [handPosition, setHandPositionState] = useState<HandPosition>({ x: 24, y: 58, z: 0 });
   const [events, setEvents] = useState<GestureEvent[]>([]);
   const demoIndexRef = useRef(0);
   const lastSmartGloveAtRef = useRef(0);
+  const gripStateRef = useRef(initialGripClassifierState);
+  const fingerTapStateRef = useRef(initialFingerTapDetectorState());
 
   const setInputMode = useCallback((mode: InputMode) => {
     setInputModeState(mode);
@@ -128,33 +158,120 @@ export function PatientInputProvider({
     [handPosition, patientId, sessionId]
   );
 
-  useEffect(() => {
-    if (inputMode !== "glove" || !smartGloveEvent || smartGloveEvent.patientId !== patientId) return;
-    lastSmartGloveAtRef.current = Date.now();
-    setCurrentGesture(smartGloveEvent.gesture);
-    setFingerBends({
-      thumb: smartGloveEvent.thumb,
-      index: smartGloveEvent.index,
-      middle: smartGloveEvent.middle,
-      ring: smartGloveEvent.ring,
-      pinky: smartGloveEvent.pinky
-    });
-    setEvents((items) => [smartGloveEvent, ...items].slice(0, 180));
-  }, [inputMode, patientId, smartGloveEvent]);
+  const applyGloveEvent = useCallback((event: GestureEvent) => {
+    const bridgePatientId = "demo-patient-1";
+    const hardwareMode = effectiveGloveMode !== "default";
+    const patientMatches = event.patientId === patientId || (hardwareMode && event.patientId === bridgePatientId);
+    if (inputMode !== "glove" || !patientMatches) return;
+    const hasRawValues = Boolean(event.rawValues);
+    if (hardwareMode && !hasRawValues) return;
+
+    const eventAt = new Date(event.timestamp).getTime();
+    const receivedAt = Number.isNaN(eventAt) ? Date.now() : eventAt;
+    lastSmartGloveAtRef.current = receivedAt;
+    setRawValues(event.rawValues ?? null);
+    if (event.rawValues) {
+      setLastRawAt(receivedAt);
+      setRawConnected(true);
+      setRawSamples((items) => [event.rawValues as Record<string, number>, ...items].slice(0, 8));
+    }
+    const eventBends = {
+      thumb: event.thumb,
+      index: event.index,
+      middle: event.middle,
+      ring: event.ring,
+      pinky: event.pinky
+    };
+    const open = calibration?.steps.open;
+    const fist = calibration?.steps.fist;
+    const hasRawCalibration = event.rawValues && open && fist;
+    const calibratedRawValues = hasRawCalibration ? event.rawValues as Record<string, number> : null;
+    const bends = hasRawCalibration
+      ? calibratedBendsFromRaw(calibratedRawValues!, open, fist)
+      : eventBends;
+    let gesture: GestureName;
+    let detectedTapEvents: GestureEvent[] = [];
+    if (effectiveGloveMode === "ball-pickup") {
+      const nextGrip = classifyGripFrame(bends, gripStateRef.current);
+      gripStateRef.current = nextGrip.state;
+      gesture = nextGrip.gesture;
+    } else if (effectiveGloveMode === "finger-tap") {
+      const timestamp = receivedAt;
+      const profiles = calibration?.fingerTapProfiles;
+      const detection =
+        hasRawCalibration
+          ? detectFingerTapsFromRaw(calibratedRawValues!, open, fist, fingerTapStateRef.current, timestamp, profiles)
+          : detectFingerTapsFromBends(bends, fingerTapStateRef.current, timestamp, profiles);
+      fingerTapStateRef.current = detection.state;
+      gesture = event.rawValues && open && fist ? classifyGesture(bends) : event.gesture;
+      detectedTapEvents = detection.taps.map((tap) => {
+        const tapGesture = `tap_${tap.finger}` as GestureName;
+        return {
+          ...event,
+          id: `${event.id}-tap-${tap.finger}-${tap.timestamp}`,
+          gesture: tapGesture,
+          timestamp: new Date(tap.timestamp).toISOString(),
+          accuracy: Math.max(0, Math.min(100, Math.round(tap.confidence))),
+          holdMs: 0,
+          smoothness: Math.max(0, Math.min(100, Math.round(tap.strength))),
+          ...tap.bends
+        };
+      });
+    } else {
+      gesture = event.rawValues && open && fist ? classifyGesture(bends) : event.gesture;
+    }
+    const calibratedEvent = { ...event, ...bends, gesture };
+    setCurrentGesture(gesture);
+    setFingerBends(bends);
+    setEvents((items) => [calibratedEvent, ...detectedTapEvents, ...items].slice(0, 180));
+  }, [calibration?.fingerTapProfiles, calibration?.steps.fist, calibration?.steps.open, effectiveGloveMode, inputMode, patientId]);
 
   useEffect(() => {
+    if (!smartGloveEvent) return;
+    applyGloveEvent(smartGloveEvent);
+  }, [applyGloveEvent, smartGloveEvent]);
+
+  useEffect(() => {
+    if (effectiveGloveMode === "default") return undefined;
+    let cancelled = false;
+
+    const pollLatestRaw = async () => {
+      const event = await fetchLatestGloveEvent();
+      if (!cancelled && event?.rawValues) {
+        applyGloveEvent(event);
+      }
+    };
+
+    void pollLatestRaw();
+    const poll = window.setInterval(() => void pollLatestRaw(), 350);
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+    };
+  }, [applyGloveEvent, effectiveGloveMode]);
+
+  useEffect(() => {
+    if (effectiveGloveMode !== "default") return undefined;
     const interval = window.setInterval(
       () => {
         if (Date.now() - lastSmartGloveAtRef.current < 2500) return;
         const item = demoPath[demoIndexRef.current % demoPath.length];
         demoIndexRef.current += 1;
-        emitGesture(item.gesture, gestureTargets[item.gesture], item.position);
+        emitGesture(item.gesture, gestureTargets[item.gesture]);
       },
       slowMode ? 1400 : 900
     );
 
     return () => window.clearInterval(interval);
-  }, [emitGesture, slowMode]);
+  }, [effectiveGloveMode, emitGesture, slowMode]);
+
+  useEffect(() => {
+    if (effectiveGloveMode === "default") return undefined;
+    const watchdog = window.setInterval(() => {
+      setRawConnected((connected) => (connected && Date.now() - lastSmartGloveAtRef.current <= 1800 ? connected : false));
+    }, 500);
+    return () => window.clearInterval(watchdog);
+  }, [effectiveGloveMode]);
 
   const value = useMemo(
     () => ({
@@ -162,12 +279,16 @@ export function PatientInputProvider({
       setInputMode,
       currentGesture,
       fingerBends,
+      rawValues,
+      rawSamples,
+      rawConnected,
+      lastRawAt,
       handPosition,
       events,
       emitGesture,
       setHandPosition
     }),
-    [currentGesture, emitGesture, events, fingerBends, handPosition, inputMode, setHandPosition, setInputMode]
+    [currentGesture, emitGesture, events, fingerBends, handPosition, inputMode, lastRawAt, rawConnected, rawSamples, rawValues, setHandPosition, setInputMode]
   );
 
   return <PatientInputContext.Provider value={value}>{children}</PatientInputContext.Provider>;
