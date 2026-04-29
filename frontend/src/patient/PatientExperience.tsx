@@ -14,7 +14,6 @@ import {
   Heart,
   Layers,
   Link2,
-  ListChecks,
   LogOut,
   Play,
   Pointer,
@@ -22,7 +21,6 @@ import {
   Save,
   Send,
   Sparkles,
-  Stethoscope,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { fingerNames, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
@@ -42,6 +40,7 @@ import type {
 import { PatientGame, type GamePlayResult, gameIcons } from "./PatientGames";
 import { manifestForGame } from "./gameRegistry";
 import { RehabGameCatalogArt, rehabGameCatalogTagline } from "./RehabGameCatalogArt";
+import { AnimatedGamePreview } from "./AnimatedGamePreview";
 import { PatientInputProvider, inputModeLabels, usePatientInput } from "./input";
 import { averageRawSamples } from "./ballPickupGrip";
 import {
@@ -93,6 +92,29 @@ const fingerLabels: Record<FingerName, string> = {
   middle: "Middle",
   ring: "Ring",
   pinky: "Pinky"
+};
+
+const pregameInstructionSteps: Record<GameId, string[]> = {
+  "ball-pickup": [
+    "Open your hand to relax.",
+    "Point at the target ball.",
+    "Make a fist, move to the basket, release."
+  ],
+  "finger-tap-piano": [
+    "Start when ready.",
+    "Tap only the highlighted key.",
+    "Rest if your hand feels tired."
+  ],
+  "bubble-pop": [
+    "Move to a target bubble.",
+    "Point or pinch to pop it.",
+    "Avoid decoy bubbles."
+  ],
+  "carrom-flick": [
+    "Aim from the baseline.",
+    "Pull back to set power.",
+    "Release with a light flick."
+  ]
 };
 
 function formatDateTime(value: string) {
@@ -382,6 +404,11 @@ export function PatientExperience({
   const gloveMode = selectedGameManifest?.gloveMode ?? "default";
 
   const routeStep = route.step;
+  const routeAnchor = "assignmentId" in route ? `${route.step}:${route.assignmentId}` : route.step;
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [routeAnchor]);
 
   useEffect(() => {
     if (assignments.length > 0) return;
@@ -550,7 +577,6 @@ export function PatientExperience({
       return (
         <AssignmentDetail
           assignment={a}
-          latestResult={results.find((result) => result.assignmentId === a.id)}
           onBack={() => setRoute({ step: "dashboard" })}
           onCalibration={() => {
             resetSessionState();
@@ -668,7 +694,7 @@ export function PatientExperience({
       sessionId={"assignmentId" in route ? route.assignmentId : undefined}
       slowMode={accessibilityMode}
     >
-      <section className={`patient-experience ${accessibilityMode ? "patient-a11y" : ""}`}>
+      <section className={`patient-experience patient-experience--${experienceMode} ${accessibilityMode ? "patient-a11y" : ""}`}>
         <PatientUtilityBar
           accessibilityMode={accessibilityMode}
           setAccessibilityMode={setAccessibilityMode}
@@ -760,144 +786,46 @@ function PatientDashboard({
 
   if (experienceMode === "doctor-library") {
     return (
-      <section className="page-stack rehab-games-doctor-page">
-        <div className="rg-shell rg-shell--hero">
-          <header className="rg-hero" aria-labelledby="rg-hero-title">
-            <span className="rg-kicker">Rehab Games library</span>
-            <h2 id="rg-hero-title">Your clinic&apos;s Rehab Games</h2>
-            <p className="rg-lead">
-              Preview games you prescribe. Patient plans stay in each patient&apos;s workspace.
-            </p>
-            {assignments[0] ? (
-              <button
-                type="button"
-                className="primary-button rg-hero__cta"
-                onClick={() => onOpenAssignment(assignments[0].id)}
-              >
-                <Play size={17} aria-hidden />
-                Try a game preview
-              </button>
-            ) : null}
+      <section className="page-stack rehab-games-doctor-page" aria-labelledby="rg-page-title">
+        <div className="rg-library-shell">
+          <header className="rg-library-head">
+            <h2 id="rg-page-title">Rehab Games</h2>
+            <p>Choose a game to preview.</p>
           </header>
-        </div>
 
-        <div className="rg-shell rg-shell--stats">
-          <div className="rg-stats" role="list" aria-label="Library activity">
-            <div className="rg-stat rg-stat--minimal" role="listitem">
-              <CheckCircle2 className="rg-stat__glyph" size={16} strokeWidth={2} aria-hidden />
-              <div className="rg-stat__copy">
-                <span className="rg-stat__label">Today</span>
-                <strong className="rg-stat__num">{completionToday}%</strong>
-              </div>
-            </div>
-            <div className="rg-stat rg-stat--minimal" role="listitem">
-              <Gauge className="rg-stat__glyph" size={16} strokeWidth={2} aria-hidden />
-              <div className="rg-stat__copy">
-                <span className="rg-stat__label">This week</span>
-                <strong className="rg-stat__num">{weeklyReps}</strong>
-              </div>
-            </div>
-            <div className="rg-stat rg-stat--minimal" role="listitem">
-              <Sparkles className="rg-stat__glyph" size={16} strokeWidth={2} aria-hidden />
-              <div className="rg-stat__copy">
-                <span className="rg-stat__label">Streak</span>
-                <strong className="rg-stat__num">{streak}d</strong>
-              </div>
-            </div>
-            <div className="rg-stat rg-stat--minimal" role="listitem">
-              <CalendarDays className="rg-stat__glyph" size={16} strokeWidth={2} aria-hidden />
-              <div className="rg-stat__copy">
-                <span className="rg-stat__label">Next visit</span>
-                <strong className="rg-stat__num rg-stat__num--sm">
-                  {upcomingAppointment ? formatDate(upcomingAppointment.startsAt) : "—"}
-                </strong>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="two-column rg-main rg-shell rg-shell--split">
-          <article className="rg-catalog">
-            <div className="rg-catalog__head">
-              <h3 className="rg-catalog__title">Game catalog</h3>
-              <p className="rg-catalog__lede">Four modules · each with a distinct training focus</p>
-            </div>
-            {assignments.length === 0 ? (
-              <EmptyState title="No games in catalog" detail="Assignments are injected when you load a roster patient elsewhere." />
-            ) : (
-              <div className="rg-catalog-grid">
-                {assignments.map((assignment) => {
-                  const gid = assignment.gameId as GameId;
-                  const completed = results.some((result) => result.assignmentId === assignment.id);
-                  return (
-                    <article className={`rg-game-card rg-game-card--theme-${gid}`} key={assignment.id}>
-                      <div className="rg-game-card__viz">
-                        <RehabGameCatalogArt gameId={gid} />
+          {assignments.length === 0 ? (
+            <EmptyState title="No games available" detail="Game previews will appear here when the catalog is loaded." />
+          ) : (
+            <div className="rg-catalog-grid">
+              {assignments.map((assignment) => {
+                const gid = assignment.gameId as GameId;
+                return (
+                  <article className={`rg-game-card rg-game-card--theme-${gid}`} key={assignment.id}>
+                    <div className="rg-game-card__viz" aria-hidden>
+                      <RehabGameCatalogArt gameId={gid} />
+                    </div>
+                    <div className="rg-game-card__body">
+                      <h3 className="rg-game-card__title">{assignment.name}</h3>
+                      <p className="rg-game-desc">{rehabGameCatalogTagline(gid)}</p>
+                      <div className="rg-game-meta" aria-label={`${assignment.name} details`}>
+                        <span>{assignment.config.targetReps} reps</span>
+                        <span>{difficultyLabel(assignment.config.difficulty)}</span>
+                        <span>{assignment.config.frequency.toLowerCase()}</span>
                       </div>
-                      <div className="rg-game-card__body">
-                        <div className="rg-game-card__head-row">
-                          <h4 className="rg-game-card__title">{assignment.name}</h4>
-                          {completed ? <span className="rg-game-minichip">Logged</span> : null}
-                        </div>
-                        <p className="rg-game-desc">{rehabGameCatalogTagline(gid)}</p>
-                        <div className="rg-game-meta">
-                          <span>{assignment.config.targetReps} reps</span>
-                          <span className="rg-game-meta-div" aria-hidden>
-                            ·
-                          </span>
-                          <span>{difficultyLabel(assignment.config.difficulty)}</span>
-                          <span className="rg-game-meta-div" aria-hidden>
-                            ·
-                          </span>
-                          <span>{assignment.config.frequency}</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="rg-game-card__link"
-                          onClick={() => onOpenAssignment(assignment.id)}
-                        >
-                          View details
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </article>
-
-          <aside className="rg-snapshot" aria-label="Clinic snapshot">
-            <h3 className="rg-snapshot__title">Clinic snapshot</h3>
-
-            <div className="rg-snapshot-row">
-              <span className="rg-snapshot-label">Latest result</span>
-              {latestResult ? (
-                <p className="rg-snapshot-line">
-                  <strong>{latestResult.gameName}</strong> · {latestResult.accuracy}% ·{" "}
-                  <span className="rg-snapshot-sub">{formatDateTime(latestResult.startedAt)}</span>
-                </p>
-              ) : (
-                <p className="rg-snapshot-line rg-snapshot-muted">No previews saved locally yet.</p>
-              )}
+                    </div>
+                    <button
+                      type="button"
+                      className="primary-button rg-game-card__link"
+                      onClick={() => onOpenAssignment(assignment.id)}
+                    >
+                      <Play size={16} aria-hidden />
+                      View
+                    </button>
+                  </article>
+                );
+              })}
             </div>
-
-            <div className="rg-snapshot-row">
-              <span className="rg-snapshot-label">Next visit</span>
-              {upcomingAppointment ? (
-                <p className="rg-snapshot-line">
-                  {formatDate(upcomingAppointment.startsAt)} · {upcomingAppointment.title}
-                  {upcomingAppointment.location ? ` · ${upcomingAppointment.location}` : ""}
-                </p>
-              ) : (
-                <p className="rg-snapshot-line rg-snapshot-muted">None scheduled · use a patient workspace for dates.</p>
-              )}
-            </div>
-
-            <div className="rg-snapshot-row rg-snapshot-row--last">
-              <span className="rg-snapshot-label">Library</span>
-              <p className="rg-snapshot-line rg-snapshot-note">{assignments[0]?.doctorNotes ?? patient.goal}</p>
-            </div>
-          </aside>
+          )}
         </div>
       </section>
     );
@@ -1013,37 +941,31 @@ function PatientDashboard({
 
 function AssignmentDetail({
   assignment,
-  latestResult,
   onBack,
   onCalibration,
   onQuickPlay
 }: {
   assignment: PatientCareAssignment;
-  latestResult?: SessionResult;
   onBack: () => void;
   onCalibration: () => void;
   onQuickPlay: () => void;
 }) {
-  const tutorial = gameTutorials[assignment.gameId];
-  const GameBadgeIcon = gameIcons[assignment.gameId];
-  const statusDone = Boolean(latestResult);
-  const statusLabel = statusDone ? "Completed" : assignment.status === "missed" ? "Missed" : "Due";
-
+  const setupSteps = [
+    { label: "Check in", Icon: Heart },
+    { label: "Calibrate", Icon: HandMetal },
+    { label: "Play", Icon: Play }
+  ];
   const skills = assignment.config.targetSkills;
+  const instructions = pregameInstructionSteps[assignment.gameId];
+
   return (
     <section className={`page-stack pregame-detail pregame-detail--theme-${assignment.gameId}`}>
-      <BackButton onBack={onBack} label="Back to Dashboard" />
+      <BackButton onBack={onBack} label="Back" />
 
-      <header className="pregame-hero">
+      <header className="pregame-hero" aria-labelledby="pregame-title">
         <div className="pregame-hero-grid">
           <div className="pregame-hero-copy">
-            <div className="pregame-hero-badges">
-              <span className="pregame-mini-badge">
-                <GameBadgeIcon size={17} aria-hidden strokeWidth={1.95} /> {tutorial.title}
-              </span>
-              <span className="pregame-mini-badge subdued">Care plan</span>
-            </div>
-            <h2 className="pregame-hero-title">{assignment.name}</h2>
+            <h2 className="pregame-hero-title" id="pregame-title">{assignment.name}</h2>
             <p className="pregame-hero-sub">{rehabGameCatalogTagline(assignment.gameId)}</p>
             <div className="pregame-chip-row" aria-label="Session parameters">
               <span className="pregame-chip pregame-chip--reps">
@@ -1069,109 +991,54 @@ function AssignmentDetail({
               </button>
             </div>
           </div>
-          <div className="pregame-hero-visual" aria-hidden>
-            <div className="pregame-hero-art">
-              <RehabGameCatalogArt gameId={assignment.gameId} />
-            </div>
-          </div>
+          <aside className="pregame-hero-visual" aria-hidden>
+            <AnimatedGamePreview gameId={assignment.gameId} difficulty={assignment.config.difficulty} />
+          </aside>
         </div>
       </header>
 
-      <div className="pregame-stat-grid" role="list">
-        <article className="pregame-stat-card pregame-stat-card--reps" role="listitem">
-          <span className="pregame-stat-icon-wrap" aria-hidden>
-            <Repeat size={17} strokeWidth={2} />
-          </span>
-          <span className="pregame-stat-label">Target reps</span>
-          <strong className="pregame-stat-value">{assignment.config.targetReps}</strong>
-          <small className="pregame-stat-hint">{assignment.config.rounds} rounds • ~{assignment.config.estimatedMinutes} min est.</small>
-        </article>
-        <article className="pregame-stat-card pregame-stat-card--frequency" role="listitem">
-          <span className="pregame-stat-icon-wrap" aria-hidden>
-            <CalendarClock size={17} strokeWidth={2} />
-          </span>
-          <span className="pregame-stat-label">Frequency</span>
-          <strong className="pregame-stat-value">{assignment.config.frequency}</strong>
-          <small className="pregame-stat-hint">Due {formatDate(assignment.dueDate)}</small>
-        </article>
-        <article className="pregame-stat-card pregame-stat-card--difficulty" role="listitem">
-          <span className="pregame-stat-icon-wrap" aria-hidden>
-            <Gauge size={17} strokeWidth={2} />
-          </span>
-          <span className="pregame-stat-label">Difficulty</span>
-          <strong className="pregame-stat-value">{difficultyLabel(assignment.config.difficulty)}</strong>
-          <small className="pregame-stat-hint">Tune pace in-session if needed</small>
-        </article>
-        <article
-          className={`pregame-stat-card pregame-stat-card--status ${statusDone ? "is-complete" : assignment.status === "missed" ? "is-alert" : "is-neutral"}`}
-          role="listitem"
-        >
-          <span className="pregame-stat-icon-wrap" aria-hidden>
-            <CheckCircle2 size={17} strokeWidth={2} />
-          </span>
-          <span className="pregame-stat-label">Status</span>
-          <strong className="pregame-stat-value">{statusLabel}</strong>
-          <small className="pregame-stat-hint">{latestResult ? `${latestResult.accuracy}% last accuracy` : "Shows after your first completion"}</small>
-        </article>
-      </div>
-
-      <section className="pregame-preview-strip" aria-label="Gameplay preview">
-        <div className="pregame-preview-caption">
-          <span className="pregame-preview-eyebrow">Practice preview</span>
-          <p>Light scene from this rehab game — gestures and pacing match your clinician plan.</p>
-        </div>
-        <div className="pregame-preview-visual">
-          <RehabGameCatalogArt gameId={assignment.gameId} />
+      <section className="pregame-readiness-strip" aria-label="Session setup path">
+        <div className="pregame-readiness-steps">
+          {setupSteps.map(({ label, Icon }, index) => (
+            <div className="pregame-readiness-step" key={label}>
+              <span className="pregame-readiness-step-icon" aria-hidden>
+                <Icon size={17} strokeWidth={2.25} />
+              </span>
+              <strong>{label}</strong>
+              {index < setupSteps.length - 1 ? <span className="pregame-step-connector" aria-hidden /> : null}
+            </div>
+          ))}
         </div>
       </section>
 
-      <div className="pregame-lower two-column">
-        <div className="pregame-lower-stack">
-          <section className="pregame-panel pregame-panel--skills">
-            <div className="pregame-panel-head">
-              <h3>Target Skills</h3>
-              <span>{skills.length} focuses</span>
-            </div>
-            <div className="pregame-skill-pills">
-              {skills.map((skill) => (
-                <span key={skill} className="pregame-skill-pill">
-                  <Sparkles size={13} aria-hidden strokeWidth={2.25} /> {skill}
-                </span>
-              ))}
-            </div>
-          </section>
-
-          <section className="pregame-panel pregame-guidance-panel">
-            <div className="pregame-panel-head">
-              <h3>Doctor guidance</h3>
-              <Stethoscope size={18} strokeWidth={2} aria-hidden />
-            </div>
-            <div className="pregame-guidance-inner">
-              <div className="pregame-guidance-block">
-                <div className="pregame-guidance-label">
-                  <ClipboardList size={15} aria-hidden strokeWidth={2.25} /> Instructions
-                </div>
-                <p>{assignment.doctorInstructions}</p>
-              </div>
-              <div className="pregame-guidance-block pregame-guidance-block--muted">
-                <div className="pregame-guidance-label">
-                  <Sparkles size={15} aria-hidden strokeWidth={2.25} /> Notes
-                </div>
-                <p>{assignment.doctorNotes.trim() ? assignment.doctorNotes : "No additional notes for this session."}</p>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <section className="pregame-panel pregame-panel--steps">
-          <div className="pregame-panel-head">
-            <h3>Before you begin</h3>
-            <span>
-              <ListChecks size={16} aria-hidden strokeWidth={2.25} /> {tutorial.steps.length} steps
-            </span>
-          </div>
-          <TutorialSteps assignment={assignment} pregame />
+      <div className="pregame-lower">
+        <section className="pregame-quick-section">
+          <h3>Before you begin</h3>
+          <ol className="pregame-instruction-list">
+            {instructions.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
         </section>
+
+        <section className="pregame-quick-section pregame-skills-section">
+          <h3>Skills</h3>
+          <div className="pregame-skill-pills">
+            {skills.map((skill) => (
+              <span key={skill} className="pregame-skill-pill">
+                {skill}
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <details className="pregame-details">
+          <summary>Doctor notes</summary>
+          <div className="pregame-details-body">
+            <p>{assignment.doctorInstructions}</p>
+            {assignment.doctorNotes.trim() ? <p>{assignment.doctorNotes}</p> : null}
+          </div>
+        </details>
       </div>
     </section>
   );
