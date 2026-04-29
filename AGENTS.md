@@ -1,0 +1,162 @@
+# AGENTS.md
+
+This file provides guidance to OpenAI Codex when working with code in this repository.
+
+## Keeping this file current
+
+Update this file as part of any task that changes how the codebase works. The goal is to keep enough context here that future agents can be productive without re-reading source files. Specifically, update it when:
+
+- A new package, service, or significant module is added or removed
+- A new feature is built — summarise what it does, where it lives, and how it connects to the rest of the system
+- A dev, build, test, or lint command changes
+- The storage mode, environment variables, or ports change
+- The data flow or architecture between packages changes
+- Key business logic changes (e.g. how reps are counted, how gestures are scored)
+- New demo credentials, seed data IDs, or setup steps are introduced
+- A known limitation, workaround, or non-obvious constraint is added or resolved
+
+Keep entries concise — only record what is non-obvious or would take multiple file reads to discover. Do not duplicate information already visible from file names or package.json scripts.
+
+## Agent behaviour rules
+
+- **Never `git push` without explicit user instruction.** Commit freely, but only push when the user says to.
+
+## Repository overview
+
+Three independent packages that form a rehab glove pipeline:
+
+```
+ESP32 glove  →  backend API + WebSocket  →  frontend dashboard  →  VR game
+```
+
+- `backend/` — Node.js/Express + PostgreSQL (or in-memory mock), CommonJS
+- `frontend/` — React/TypeScript therapist dashboard (Vite, ESM)
+- `vr/` — Standalone React/Three.js VR rehab game (Vite, ESM)
+
+There is no monorepo tooling; run all commands from within each package directory.
+
+## Commands
+
+### Backend
+
+```bash
+cd backend
+npm install
+npm run dev          # nodemon, port 4000
+npm run check        # node --check syntax validation (no test runner)
+npm run migrate      # create DB schema (requires PostgreSQL)
+npm run seed         # seed demo data (requires PostgreSQL)
+npm run simulate -- --patient demo-patient-1 --interval 750        # stream fake glove events
+npm run simulate -- --patient demo-patient-1 --interval 750 --count 20
+```
+
+PostgreSQL (Docker):
+```bash
+cd backend && docker compose up -d   # starts postgres on host port 55432
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev          # Vite dev server on http://127.0.0.1:5173
+npm run build        # tsc -b && vite build
+npm run test         # vitest run (single pass)
+npm run test:watch   # vitest watch
+npm run smoke        # node scripts/smoke.mjs
+```
+
+Run a single test file:
+```bash
+cd frontend && npx vitest run src/lib/gesture.test.ts
+```
+
+### VR (standalone)
+
+```bash
+cd vr
+npm install
+npm run dev          # Vite dev server
+npm run build        # tsc -b && vite build
+npm run lint         # eslint (only package with lint configured)
+```
+
+### GitHub
+
+```bash
+gh repo view MohsinCoding/gloving
+gh pr list --repo MohsinCoding/gloving
+gh issue list --repo MohsinCoding/gloving
+```
+
+## Architecture
+
+### Backend storage modes
+
+`STORAGE_MODE` env var controls which repository is loaded:
+
+- `mock` (default) — `src/mockRepository.js`, fully in-memory with seeded demo data, no DB needed
+- `postgres` — `src/repositories.js`, requires Docker PostgreSQL
+
+`src/server.js` selects the repo at startup: `const repo = usingPostgres ? require("./repositories") : require("./mockRepository")`. All route handlers call `repo.*` methods identically regardless of mode.
+
+`src/realtime.js` runs a `ws` WebSocket server on `/ws`. Clients subscribe by patientId or sessionId; gesture events are broadcast immediately on `POST /api/glove/event`.
+
+### Frontend data flow
+
+`src/App.tsx` is a single large component tree. State machine:
+1. On mount: `checkBackendHealth()` → if reachable, fetch patients from backend; otherwise fall back to `seedPatients` from `src/data/mockData.ts`
+2. If backend connected: open WebSocket via `connectGestureStream()` for live events
+3. Built-in simulator (toggle in Live Session view) calls `POST /api/dev/fake-gesture` when backend is up, or generates events locally from `mockData.ts` when offline
+
+Rep counting: a fist→open gesture transition increments `repsCompleted`.
+
+`src/lib/backend.ts` owns all HTTP and WebSocket calls. It maps backend JSON shapes to the frontend's internal types, normalising missing fields and deriving `accuracy`, `holdMs`, and `smoothness` if absent.
+
+`src/lib/gesture.ts` contains pure gesture utilities (classification, accuracy scoring, patient summaries). This is the only tested file (`gesture.test.ts` via Vitest).
+
+`src/lib/useGloveData.ts` is the shared live glove subscription hook. It exposes both `normalized` finger bends (0–100) and `rawValues` ADC readings from the same WebSocket event. In `hardwareOnly` mode it ignores simulator traffic, polls `/api/glove/latest`, and only marks the glove connected when raw ESP32 frames are arriving.
+
+`src/App.tsx` includes a therapist-facing `glove-dev` view used for hardware bring-up. It captures OPEN/FIST raw ADC baselines, saves them through `patient/patientApi.ts` to `/api/calibration`, and immediately applies the saved calibration locally for the on-screen percent readout and 3D hand preview. The calibrated values and 3D hand stay locked until a saved calibration exists.
+
+`backend/src/mockRepository.js` keeps `/api/glove/latest` as the last true hardware frame only. Simulator events still broadcast over WebSocket, but they no longer overwrite the latest raw glove sample used by the Glove Dev monitor.
+
+`backend/src/repositories.js` now mirrors the glove bring-up features in Postgres mode. It stores `rawValues` inside `gesture_events.raw`, exposes `getLatestGloveEvent()` by reading the newest row that contains raw glove data, and lazily creates/uses a `glove_calibrations` table for `saveCalibration()` / `getCalibration()`. Without this, the Glove Dev monitor cannot enable capture buttons when the backend runs with `STORAGE_MODE=postgres`.
+
+`frontend/public/models/realistic-hand.glb` is the current hand asset used by both the therapist Glove Dev preview and the patient calibration preview. It comes from Poly Pizza’s “Realistic Hand” by J-Toastie (CC-BY 3.0). `frontend/src/vr/components/HandModel3D.tsx` must render it as a separate armature bone tree plus a skinned mesh, matching the GLTF structure, rather than mounting the whole cloned scene as a single primitive. The thumb bones in this asset are named `Bone001`, `Bone002`, and `Bone003` (no dots). Finger motion is applied by slerping from the base pose toward the model’s closed-hand pose per finger using the live calibrated bend percentages.
+
+### Patient-side demo flow
+
+`frontend/src/patient/` contains the patient experience added for the hackathon demo. `PatientExperience.tsx` owns the patient dashboard, assignment detail, tutorial, calibration, pain/fatigue check-ins, results, calendar, and safe mock assistant UI. It is mounted from the existing `App.tsx` view switch via `patient`, `patient-calendar`, and `patient-assistant` views, grouped in the sidebar under **Rehab Games**.
+
+Patient assignments, appointments, tutorials, and local result persistence live in `patientData.ts`; session results are stored in localStorage under `gloving.patient.sessionResults.v1` and also converted to the existing `RehabSession` shape so therapist progress/dashboard views can show saved patient game results. `patientApi.ts` tries the existing backend session start/end endpoints when connected, then always keeps the full patient result locally for the demo.
+
+`patient/input.tsx` is the shared patient input abstraction. It exposes the current gesture, finger bends, hand position, event history, and manual gesture controls. Patient-facing input is Smart Glove only; when no glove stream is available, the provider emits local demo gesture events so localhost demos still work. Patient games also support `tap` and `flick` gestures in addition to the original glove gestures.
+
+The four patient games live in `PatientGames.tsx`: Ball Pickup, Finger Tap Piano, Bubble Pop, and Carrom. Ball Pickup uses React Three Fiber inside the patient game flow with a simple mesh hand, table, ball, and basket. Carrom is a 3D React Three Fiber game with start/game/end screens, random player/AI break, real 9-white/9-black/queen setup, side-specific striker baseline placement, pocket physics, queen cover/return handling, fouls/penalties, AI opponent, board-only fullscreen, and trackpad drag-release shooting when no glove is connected. Carrom loads `frontend/src/assets/carrom_board_optimized.glb` via `useGLTF` (pre-optimized for web), and prunes/hides non-board meshes at runtime (based on largest-geometry heuristic) so only the playable board surfaces render. Gameplay coins use a Planck.js 2D physics simulation for collisions and pocket detection. AI difficulty comes from the assignment config, and the Carrom end screen also surfaces rehab-style aim metrics sampled during player aim drags. Carrom can only be played fullscreen; leaving fullscreen pauses and shows a resume overlay, and all score/turn/power/rule feedback is inside the game board. Aiming uses a green forward arrow for shot direction and a red rear pullback line for release stretch. Ball Pickup and Carrom consume the shared patient input provider for glove gestures and use mouse/keyboard-style movement or drag fallback during local demos. `PatientExperience.tsx` also has a testing shortcut on assignment detail/calibration screens that skips calibration/check-in and jumps into the selected game with mock baseline data.
+
+### VR — two implementations
+
+The VR game code exists in two places:
+- `frontend/src/vr/` — legacy embedded dashboard VR code. It is no longer exposed in the main sidebar to avoid duplicating the patient Ball Pickup game.
+- `vr/` — standalone app. Has its own `WebSocketGestureAdapter.ts` and `useMockGestureAdapter.ts` to source gesture events independently.
+
+Both share the same game logic: `RehabScene.tsx` (Three.js ball-pickup scene), `SessionHud.tsx`, `gameStore.ts` (Zustand). The standalone `vr/` package can run without the frontend or backend.
+
+### Key env vars (backend `.env`)
+
+| Var | Default | Notes |
+|-----|---------|-------|
+| `PORT` | `4000` | |
+| `DATABASE_URL` | `postgres://gloving:gloving@localhost:55432/gloving` | |
+| `STORAGE_MODE` | `mock` | `mock` or `postgres` |
+| `CORS_ORIGIN` | `*` | |
+
+Frontend reads `VITE_API_BASE_URL` (default `http://127.0.0.1:4000`) and `VITE_WS_URL` from env.
+
+### Demo data
+
+Seeded by either `npm run seed` (Postgres) or loaded automatically by `mockRepository.js`:
+- Patient IDs: `demo-patient-1` (Maya Patel), `demo-patient-2` (Eli Ramos), `demo-patient-3` (Jordan Kim)
+- Login: `therapist@demo.local` / `demo-password` (frontend only, no real auth)

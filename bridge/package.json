@@ -1,0 +1,16 @@
+{
+  "name": "gloving-bridge",
+  "version": "1.0.0",
+  "description": "USB serial bridge: reads ESP32 glove JSON and forwards to backend API",
+  "main": "bridge.js",
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node bridge.js"
+  },
+  "dependencies": {
+    "@serialport/parser-readline": "^12.0.0",
+    "dotenv": "^16.0.0",
+    "serialport": "^12.0.0"
+  }
+}
