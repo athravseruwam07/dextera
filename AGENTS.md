@@ -33,6 +33,8 @@ ESP32 glove  →  backend API + WebSocket  →  frontend dashboard  →  VR game
 - `frontend/` — React/TypeScript therapist dashboard (Vite, ESM)
 - `vr/` — Standalone React/Three.js VR rehab game (Vite, ESM)
 
+The app/product brand is Dextera.
+
 There is no monorepo tooling; run all commands from within each package directory.
 
 ## Commands
@@ -109,6 +111,14 @@ Rep counting: a fist→open gesture transition increments `repsCompleted`.
 `src/lib/backend.ts` owns all HTTP and WebSocket calls. It maps backend JSON shapes to the frontend's internal types, normalising missing fields and deriving `accuracy`, `holdMs`, and `smoothness` if absent.
 
 `src/lib/gesture.ts` contains pure gesture utilities (classification, accuracy scoring, patient summaries). This is the only tested file (`gesture.test.ts` via Vitest).
+
+Therapist Settings are opened from the top-right gear dropdown, not the sidebar or a dedicated Settings page. Accounts and System Status open focused popups; Sign out remains in the dropdown.
+
+Doctor Dashboard in `src/App.tsx` uses compact top metric tiles and caps the Alerts needing review / Upcoming appointments previews at two items each. `View x+ more` opens a centered scrollable modal that preserves patient navigation actions.
+
+Theme mode is controlled from Settings dropdowns and persists `dextera.theme` in localStorage by applying `data-theme` on `document.documentElement`; dark styles live in `frontend/src/styles.css`.
+
+Patient portal uses its own shell in `frontend/src/patient/PatientExperience.tsx`: Dextera brand in a left sidebar, vertical Plan / Calendar / Recovery Progress / Assistant navigation, and a top-right Settings dropdown containing Accessibility and Exit. Recovery Progress uses existing saved patient session results and roster sessions to show patient-facing accuracy, reps, pain/fatigue, game progress, and recent-session trends.
 
 `src/lib/useGloveData.ts` is the shared live glove subscription hook. It exposes both `normalized` finger bends (0–100) and `rawValues` ADC readings from the same WebSocket event. In `hardwareOnly` mode it ignores simulator traffic, polls `/api/glove/latest`, and only marks the glove connected when raw ESP32 frames are arriving.
 

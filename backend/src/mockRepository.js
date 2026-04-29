@@ -34,7 +34,7 @@ const doctor = {
   id: "doctor-1",
   userId: "user-doctor-1",
   name: "Dr. Singh",
-  email: "dr.singh@regrip.demo",
+  email: "dr.singh@dextera.demo",
   specialty: "Physiotherapist"
 };
 

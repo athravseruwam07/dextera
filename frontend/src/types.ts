@@ -16,7 +16,6 @@ export type ViewName =
   | "dashboard"
   | "patients"
   | "appointments"
-  | "settings"
   | "patient"
   | "rehab-games"
   | "rehab-calendar"

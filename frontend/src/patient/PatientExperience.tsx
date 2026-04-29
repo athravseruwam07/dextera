@@ -21,8 +21,21 @@ import {
   Save,
   Send,
   Sparkles,
+  Settings,
+  TrendingUp,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 import { fingerNames, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
 import type {
   CalibrationData,
@@ -76,6 +89,7 @@ type PatientRoute =
   | { step: "post-check"; assignmentId: string }
   | { step: "results"; assignmentId: string }
   | { step: "calendar" }
+  | { step: "progress" }
   | { step: "assistant" };
 
 type AssistantMessage = {
@@ -349,6 +363,8 @@ export function PatientExperience({
   assignedGames,
   clinicAppointments,
   onLogout,
+  themeMode,
+  onThemeChange,
   experienceMode = "patient"
 }: {
   patient: Patient;
@@ -363,6 +379,8 @@ export function PatientExperience({
   /** Clinician Rehab Games sidebar: full catalog preview, disconnected from roster patient assignments. */
   experienceMode?: "patient" | "doctor-library";
   onLogout?: () => void;
+  themeMode?: "light" | "dark";
+  onThemeChange?: (themeMode: "light" | "dark") => void;
 }) {
   const [accessibilityMode, setAccessibilityMode] = useAccessibilityMode();
   const [route, setRoute] = useState<PatientRoute>({ step: "dashboard" });
@@ -412,7 +430,7 @@ export function PatientExperience({
 
   useEffect(() => {
     if (assignments.length > 0) return;
-    if (routeStep === "dashboard" || routeStep === "calendar" || routeStep === "assistant") return;
+    if (routeStep === "dashboard" || routeStep === "calendar" || routeStep === "progress" || routeStep === "assistant") return;
     setRoute({ step: "dashboard" });
   }, [assignments.length, routeStep]);
 
@@ -539,6 +557,9 @@ export function PatientExperience({
     }
     if (route.step === "assistant") {
       return <PatientAssistant patient={patient} assignments={assignments} results={results} experienceMode={experienceMode} />;
+    }
+    if (route.step === "progress") {
+      return <PatientRecoveryProgress patient={patient} assignments={assignments} results={results} />;
     }
 
     const stepNeedsAssignment =
@@ -695,67 +716,169 @@ export function PatientExperience({
       slowMode={accessibilityMode}
     >
       <section className={`patient-experience patient-experience--${experienceMode} ${accessibilityMode ? "patient-a11y" : ""}`}>
-        <PatientUtilityBar
-          accessibilityMode={accessibilityMode}
-          setAccessibilityMode={setAccessibilityMode}
+        <PatientPortalShell
+          patient={patient}
+          activeRoute={route.step}
           onHome={() => setRoute({ step: "dashboard" })}
           onCalendar={() => setRoute({ step: "calendar" })}
+          onProgress={() => setRoute({ step: "progress" })}
           onAssistant={() => setRoute({ step: "assistant" })}
+          accessibilityMode={accessibilityMode}
+          setAccessibilityMode={setAccessibilityMode}
+          themeMode={themeMode}
+          onThemeChange={onThemeChange}
           onLogout={onLogout}
-        />
-        {content}
+        >
+          {content}
+        </PatientPortalShell>
       </section>
     </PatientInputProvider>
   );
 }
 
-function PatientUtilityBar({
-  accessibilityMode,
-  setAccessibilityMode,
+function PatientPortalShell({
+  patient,
+  activeRoute,
   onHome,
   onCalendar,
+  onProgress,
   onAssistant,
+  accessibilityMode,
+  setAccessibilityMode,
+  themeMode,
+  onThemeChange,
+  children,
   onLogout
 }: {
-  accessibilityMode: boolean;
-  setAccessibilityMode: (value: boolean) => void;
+  patient: Patient;
+  activeRoute: PatientRoute["step"];
   onHome: () => void;
   onCalendar: () => void;
+  onProgress: () => void;
   onAssistant: () => void;
+  accessibilityMode: boolean;
+  setAccessibilityMode: (value: boolean) => void;
+  themeMode?: "light" | "dark";
+  onThemeChange?: (themeMode: "light" | "dark") => void;
+  children: React.ReactNode;
   onLogout?: () => void;
 }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const activeNav =
+    activeRoute === "calendar"
+      ? "calendar"
+      : activeRoute === "progress"
+        ? "progress"
+        : activeRoute === "assistant"
+          ? "assistant"
+          : "plan";
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (settingsRef.current?.contains(event.target as Node)) return;
+      setSettingsOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setSettingsOpen(false);
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [settingsOpen]);
+
+  const toggleAccessibility = () => {
+    setAccessibilityMode(!accessibilityMode);
+    setSettingsOpen(false);
+  };
+
   return (
-    <div className="patient-utility-bar">
-      <div className="patient-utility-nav">
-        <button type="button" className="secondary-button" onClick={onHome}>
-          <ClipboardList size={18} />
-          Plan
-        </button>
-        <button type="button" className="secondary-button" onClick={onCalendar}>
-          <CalendarDays size={18} />
-          Calendar
-        </button>
-        <button type="button" className="secondary-button" onClick={onAssistant}>
-          <Bot size={18} />
-          Assistant
-        </button>
-      </div>
-      <div className="patient-utility-nav">
-        <button
-          type="button"
-          className={`toggle-button ${accessibilityMode ? "is-on" : ""}`}
-          onClick={() => setAccessibilityMode(!accessibilityMode)}
-        >
-          <Accessibility size={18} />
-          Accessibility
-        </button>
-        {onLogout ? (
-          <button type="button" className="secondary-button patient-logout-btn" onClick={onLogout} title="Sign out">
-            <LogOut size={18} />
-            Exit
+    <div className="patient-portal-shell">
+      <aside className="patient-portal-sidebar">
+        <div className="sidebar-brand">
+          <div className="brand-mark small">
+            <Activity size={21} />
+          </div>
+          <div>
+            <strong>Dextera</strong>
+            <span>Patient portal</span>
+          </div>
+        </div>
+        <nav className="patient-side-nav" aria-label="Patient navigation">
+          <button type="button" className={activeNav === "plan" ? "active" : ""} onClick={onHome}>
+            <ClipboardList size={19} />
+            Plan
           </button>
-        ) : null}
-      </div>
+          <button type="button" className={activeNav === "calendar" ? "active" : ""} onClick={onCalendar}>
+            <CalendarDays size={19} />
+            Calendar
+          </button>
+          <button type="button" className={activeNav === "progress" ? "active" : ""} onClick={onProgress}>
+            <TrendingUp size={19} />
+            Recovery Progress
+          </button>
+          <button type="button" className={activeNav === "assistant" ? "active" : ""} onClick={onAssistant}>
+            <Bot size={19} />
+            Assistant
+          </button>
+        </nav>
+      </aside>
+
+      <main className="patient-portal-workspace">
+        <header className="patient-portal-topbar">
+          <div>
+            <span className="eyebrow">Patient workspace</span>
+            <strong>{patient.name}</strong>
+            <p>{patient.recoveryGoal || patient.goal || "Guided home rehab plan"}</p>
+          </div>
+          <div className="settings-menu" ref={settingsRef}>
+            <button
+              className="icon-button settings-menu-trigger"
+              type="button"
+              onClick={() => setSettingsOpen((open) => !open)}
+              title="Settings"
+              aria-haspopup="menu"
+              aria-expanded={settingsOpen}
+            >
+              <Settings size={18} />
+            </button>
+            {settingsOpen ? (
+              <div className="settings-dropdown patient-settings-dropdown" role="menu" aria-label="Patient settings menu">
+                <button type="button" role="menuitem" onClick={toggleAccessibility}>
+                  <Accessibility size={17} />
+                  {accessibilityMode ? "Standard Mode" : "Accessibility"}
+                </button>
+                {themeMode && onThemeChange ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onThemeChange(themeMode === "dark" ? "light" : "dark");
+                      setSettingsOpen(false);
+                    }}
+                  >
+                    {themeMode === "dark" ? "Light mode" : "Dark mode"}
+                  </button>
+                ) : null}
+                {onLogout ? (
+                  <button type="button" role="menuitem" className="settings-dropdown-danger" onClick={onLogout}>
+                    <LogOut size={17} />
+                    Exit
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </header>
+        {children}
+      </main>
     </div>
   );
 }
@@ -1762,6 +1885,224 @@ function ResultsPage({
           </button>
         </div>
         {saveMessage && <p className={saveState === "error" ? "error-text" : "safe-note"}>{saveMessage}</p>}
+      </article>
+    </section>
+  );
+}
+
+function ProgressBar({ label, percent }: { label: string; percent: number }) {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  return (
+    <div className="progress-row">
+      <div>
+        <span>{label}</span>
+        <strong>{value}%</strong>
+      </div>
+      <div className="bar-track" aria-label={`${label} ${value}%`}>
+        <div className="bar-fill" style={{ width: `${value}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function PatientRecoveryProgress({
+  patient,
+  assignments,
+  results
+}: {
+  patient: Patient;
+  assignments: PatientCareAssignment[];
+  results: SessionResult[];
+}) {
+  const sessions = recentPatientSessions(patient, results);
+  const chronologicalSessions = sessions.slice().reverse();
+  const resultTrend = results.slice().reverse();
+  const totalReps = sessions.reduce((sum, session) => sum + session.repsCompleted, 0);
+  const averageAccuracy = sessions.length
+    ? Math.round(sessions.reduce((sum, session) => sum + (session.accuracy ?? session.averageAccuracy ?? 0), 0) / sessions.length)
+    : 0;
+  const bestAccuracy = sessions.length
+    ? Math.max(...sessions.map((session) => session.accuracy ?? session.averageAccuracy ?? 0))
+    : 0;
+  const latestAccuracy = sessions[0]?.accuracy ?? sessions[0]?.averageAccuracy ?? 0;
+  const firstAccuracy = chronologicalSessions[0]?.accuracy ?? chronologicalSessions[0]?.averageAccuracy ?? latestAccuracy;
+  const accuracyDelta = Math.round(latestAccuracy - firstAccuracy);
+  const latestPain = results[0]?.painAfter.pain;
+  const firstPain = resultTrend[0]?.painBefore.pain ?? latestPain;
+  const painDelta = latestPain !== undefined && firstPain !== undefined ? latestPain - firstPain : 0;
+
+  const sessionChart = chronologicalSessions.slice(-8).map((session, index) => ({
+    label: formatDate(session.startedAt),
+    session: index + 1,
+    reps: session.repsCompleted,
+    accuracy: session.accuracy ?? session.averageAccuracy ?? 0
+  }));
+
+  const symptomChart = resultTrend.slice(-8).map((result) => ({
+    label: formatDate(result.startedAt),
+    pain: result.painAfter.pain,
+    fatigue: result.painAfter.fatigue
+  }));
+
+  const assignmentProgress = assignments.map((assignment) => {
+    const matchingResults = results.filter((result) => result.assignmentId === assignment.id);
+    const reps = matchingResults.reduce((sum, result) => sum + result.repsCompleted, 0);
+    const target = assignment.config.targetReps * Math.max(assignment.config.rounds, 1);
+    const latest = matchingResults[0];
+    return {
+      assignment,
+      reps,
+      target,
+      percent: Math.min(100, Math.round((reps / Math.max(target, 1)) * 100)),
+      latest
+    };
+  });
+
+  const weakestFingerCounts = results.reduce<Record<string, number>>((counts, result) => {
+    if (!result.weakestFinger) return counts;
+    counts[result.weakestFinger] = (counts[result.weakestFinger] ?? 0) + 1;
+    return counts;
+  }, {});
+  const focusFinger = Object.entries(weakestFingerCounts).sort((a, b) => b[1] - a[1])[0]?.[0] as FingerName | undefined;
+
+  return (
+    <section className="page-stack patient-progress-page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Recovery Progress</span>
+          <h2>Your rehab improvements</h2>
+          <p>Track your reps, movement accuracy, symptoms, and game-by-game progress over time.</p>
+        </div>
+        <span className="status-pill status-active">{sessions.length} sessions saved</span>
+      </div>
+
+      <div className="patient-metric-grid">
+        <article className="metric-card tone-teal">
+          <span>Total Reps</span>
+          <strong>{totalReps}</strong>
+          <small>All saved rehab sessions</small>
+        </article>
+        <article className="metric-card tone-blue">
+          <span>Average Accuracy</span>
+          <strong>{averageAccuracy}%</strong>
+          <small>{accuracyDelta >= 0 ? `+${accuracyDelta}` : accuracyDelta} pts from first session</small>
+        </article>
+        <article className="metric-card tone-violet">
+          <span>Best Accuracy</span>
+          <strong>{bestAccuracy}%</strong>
+          <small>Highest recorded game score</small>
+        </article>
+        <article className="metric-card tone-amber">
+          <span>Current Focus</span>
+          <strong>{focusFinger ? fingerLabels[focusFinger] : "Steady reps"}</strong>
+          <small>{painDelta > 0 ? "Watch pain after play" : "Keep smooth control"}</small>
+        </article>
+      </div>
+
+      <div className="two-column patient-progress-grid">
+        <article className="surface progress-chart-card">
+          <div className="section-title">
+            <h3>Accuracy trend</h3>
+            <span>Last {sessionChart.length} sessions</span>
+          </div>
+          {sessionChart.length === 0 ? (
+            <EmptyState title="No session data yet" detail="Complete and save a game to start building your trend." />
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={sessionChart}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" />
+                <YAxis domain={[0, 100]} />
+                <Tooltip />
+                <Line type="monotone" dataKey="accuracy" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} name="Accuracy %" />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </article>
+
+        <article className="surface progress-chart-card">
+          <div className="section-title">
+            <h3>Reps completed</h3>
+            <span>Practice volume</span>
+          </div>
+          {sessionChart.length === 0 ? (
+            <EmptyState title="No reps recorded yet" detail="Your completed reps will appear here after saved sessions." />
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={sessionChart}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="reps" fill="#0f766e" radius={[6, 6, 0, 0]} name="Reps" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </article>
+      </div>
+
+      <div className="two-column patient-progress-grid">
+        <article className="surface progress-chart-card">
+          <div className="section-title">
+            <h3>Pain and fatigue</h3>
+            <span>After each game</span>
+          </div>
+          {symptomChart.length === 0 ? (
+            <EmptyState title="No check-ins yet" detail="Pain and fatigue trends appear after game check-ins." />
+          ) : (
+            <ResponsiveContainer width="100%" height={250}>
+              <LineChart data={symptomChart}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" />
+                <YAxis domain={[0, 10]} />
+                <Tooltip />
+                <Line type="monotone" dataKey="pain" stroke="#dc2626" strokeWidth={3} name="Pain" />
+                <Line type="monotone" dataKey="fatigue" stroke="#f59e0b" strokeWidth={3} name="Fatigue" />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </article>
+
+        <article className="surface">
+          <div className="section-title">
+            <h3>Game progress</h3>
+            <span>{assignments.length} assigned</span>
+          </div>
+          <div className="stack-list">
+            {assignmentProgress.map(({ assignment, reps, target, percent, latest }) => (
+              <div className="progress-game-row" key={assignment.id}>
+                <div>
+                  <strong>{assignment.name}</strong>
+                  <p>{reps}/{target} reps completed{latest ? ` · ${latest.accuracy}% latest accuracy` : ""}</p>
+                </div>
+                <ProgressBar label={`${assignment.name} progress`} percent={percent} />
+              </div>
+            ))}
+          </div>
+        </article>
+      </div>
+
+      <article className="surface">
+        <div className="section-title">
+          <h3>Recent sessions</h3>
+          <span>Your latest saved work</span>
+        </div>
+        <div className="stack-list">
+          {sessions.slice(0, 5).map((session) => (
+            <div className="calendar-row" key={session.id}>
+              <div>
+                <strong>{formatDateTime(session.startedAt)}</strong>
+                <span>{session.gameName || session.exerciseName}</span>
+              </div>
+              <div>
+                <h3>{session.repsCompleted} reps</h3>
+                <p>{session.accuracy ?? session.averageAccuracy}% accuracy{session.weakestFinger ? ` · Focus: ${fingerLabels[session.weakestFinger]}` : ""}</p>
+              </div>
+              <span className="status-pill status-active">Saved</span>
+            </div>
+          ))}
+          {sessions.length === 0 ? <EmptyState title="No sessions saved yet" detail="Finish a rehab game and save the result to see progress here." /> : null}
+        </div>
       </article>
     </section>
   );

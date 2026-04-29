@@ -18,7 +18,8 @@ import {
   Timer,
   Trash2,
   UserRound,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -99,12 +100,22 @@ import {
   doctorAppointmentToPatientCare,
   doctorAssignmentsToPatientCare,
 } from "./patient/patientData";
-import heroImage from "./assets/regrip-hero.png";
+import heroImage from "./assets/dextera-hero.png";
 
 type AuthRole = "doctor" | "patient";
 type EntryScreen = "landing" | "login";
+type ThemeMode = "light" | "dark";
 
 const rehabGameViews: ViewName[] = ["rehab-games", "rehab-calendar", "rehab-assistant"];
+const THEME_STORAGE_KEY = "dextera.theme";
+
+function loadThemeMode(): ThemeMode {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
 
 function sideNavActive(navId: ViewName, current: ViewName) {
   if (navId === "rehab-games") return rehabGameViews.includes(current);
@@ -119,7 +130,6 @@ const viewItems: Array<{
   { id: "dashboard", label: "Dashboard", icon: ClipboardList },
   { id: "patients", label: "Patients", icon: Users },
   { id: "appointments", label: "Appointments", icon: CalendarDays },
-  { id: "settings", label: "Settings", icon: Settings },
   { id: "rehab-games", label: "Rehab Games", icon: Home },
   { id: "glove-dev", label: "Glove Dev", icon: Activity }
 ];
@@ -359,7 +369,7 @@ function LandingPage({ onSelectRole }: { onSelectRole: (role: AuthRole) => void 
             <div className="brand-mark small">
               <Activity size={21} />
             </div>
-            <span>ReGrip</span>
+            <span>Dextera</span>
           </div>
           <div className="landing-nav-actions">
             <button className="secondary-button glass-button" type="button" onClick={() => onSelectRole("patient")}>
@@ -375,7 +385,7 @@ function LandingPage({ onSelectRole }: { onSelectRole: (role: AuthRole) => void 
           <span className="landing-kicker">Clinical hand-rehab command center</span>
           <h1>Rehab that feels like play. Progress that clinicians can trust.</h1>
           <p>
-            ReGrip turns hand therapy into interactive games powered by camera tracking, optional smart glove input,
+            Dextera turns hand therapy into interactive games powered by camera tracking, optional smart glove input,
             and clinician-guided care plans.
           </p>
           <div className="landing-actions">
@@ -394,8 +404,8 @@ function LandingPage({ onSelectRole }: { onSelectRole: (role: AuthRole) => void 
           </div>
         </div>
 
-        <aside className="landing-preview" aria-label="ReGrip product preview">
-          <img src={heroImage} alt="ReGrip rehabilitation dashboard preview" />
+        <aside className="landing-preview" aria-label="Dextera product preview">
+          <img src={heroImage} alt="Dextera rehabilitation dashboard preview" />
           <div className="preview-card preview-patient">
             <span>Live session</span>
             <strong>Maya Patel</strong>
@@ -438,7 +448,7 @@ function LoginPage({
   onLogin: (email: string) => void;
   onBack: () => void;
 }) {
-  const [email, setEmail] = useState(role === "doctor" ? "doctor@regrip.demo" : "maya@regrip.demo");
+  const [email, setEmail] = useState(role === "doctor" ? "doctor@dextera.demo" : "maya@dextera.demo");
   const [password, setPassword] = useState("demo");
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
@@ -484,7 +494,7 @@ function LoginPage({
           <Activity size={28} />
         </div>
         <div>
-          <span className="eyebrow">ReGrip</span>
+          <span className="eyebrow">Dextera</span>
           <h1>{role === "doctor" ? "Doctor sign in" : "Patient sign in"}</h1>
           <p>
             {role === "doctor"
@@ -735,9 +745,16 @@ function DoctorDashboardPage({
   appointments: Appointment[];
   onSelectPatient: (id: string) => void;
 }) {
+  const [dashboardModal, setDashboardModal] = useState<"alerts" | "appointments" | null>(null);
   const activeAssignments = assignments.filter((assignment) => assignment.status === "assigned").length;
   const sessionsThisWeek = patients.reduce((sum, patient) => sum + patientSessionsThisWeek(patient), 0);
   const activeAlerts = unresolvedAlerts(alerts);
+  const dashboardPreviewLimit = 2;
+  const visibleAlerts = activeAlerts.slice(0, dashboardPreviewLimit);
+  const hiddenAlertCount = Math.max(activeAlerts.length - visibleAlerts.length, 0);
+  const scheduledAppointments = appointments.filter((appointment) => appointment.status === "scheduled");
+  const visibleAppointments = scheduledAppointments.slice(0, dashboardPreviewLimit);
+  const hiddenAppointmentCount = Math.max(scheduledAppointments.length - visibleAppointments.length, 0);
   const statusRank: Record<string, number> = { needs_review: 0, low_adherence: 1, review: 2, improving: 3, stable: 4, active: 5, paused: 6 };
   const sortedPatients = patients.slice().sort((a, b) => (statusRank[a.status] ?? 9) - (statusRank[b.status] ?? 9));
   const recentSessions = patients
@@ -745,6 +762,21 @@ function DoctorDashboardPage({
     .sort((a, b) => new Date(b.session.startedAt).getTime() - new Date(a.session.startedAt).getTime())
     .slice(0, 4);
   const patientsNeedingReview = patients.filter((patient) => ["needs_review", "low_adherence", "review"].includes(patient.status)).length;
+  const openPatientFromModal = (patientId: string) => {
+    setDashboardModal(null);
+    onSelectPatient(patientId);
+  };
+
+  useEffect(() => {
+    if (!dashboardModal) return;
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setDashboardModal(null);
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [dashboardModal]);
 
   return (
     <section className="page-stack">
@@ -761,27 +793,27 @@ function DoctorDashboardPage({
         </div>
       </div>
 
-      <div className="metric-grid">
+      <div className="metric-grid doctor-metric-grid">
 	        <MetricCard label="Total patients" value={patients.length} detail="active roster" icon={Users} />
 	        <MetricCard label="Needs review" value={patientsNeedingReview} detail="triage priority" icon={CircleDot} tone="red" />
 	        <MetricCard label="Sessions this week" value={sessionsThisWeek} detail="recorded sessions" icon={Activity} tone="amber" />
 	        <MetricCard label="Active assignments" value={activeAssignments} detail="currently assigned" icon={ClipboardList} tone="teal" />
 	      </div>
 
-	      <div className="two-column">
-	        <article className="surface">
+	      <div className="two-column dashboard-review-grid">
+	        <article className="surface dashboard-list-panel">
 	          <div className="section-title">
 	            <h3>Alerts needing review</h3>
 	            <span>{activeAlerts.length} active</span>
           </div>
-          <div className="stack-list">
+          <div className="stack-list dashboard-preview-list">
 	            {activeAlerts.length === 0 ? (
 	              <EmptyState title="No active alerts" description="All patients are clear for the current review window." />
 	            ) : (
-	              activeAlerts.map((alert) => {
+	              visibleAlerts.map((alert) => {
                 const patient = patients.find((item) => item.id === alert.patientId);
                 return (
-	                  <div className="list-card" key={alert.id}>
+	                  <div className="list-card dashboard-preview-card" key={alert.id}>
                     <div className="section-title">
                       <strong>{alert.title}</strong>
                       <SeverityBadge severity={alert.severity} />
@@ -795,24 +827,39 @@ function DoctorDashboardPage({
               })
             )}
           </div>
+          {hiddenAlertCount > 0 && (
+            <button className="dashboard-more-link" type="button" onClick={() => setDashboardModal("alerts")}>
+              View {hiddenAlertCount}+ more
+            </button>
+          )}
         </article>
 
-	        <article className="surface">
+	        <article className="surface dashboard-list-panel">
           <div className="section-title">
             <h3>Upcoming appointments</h3>
-            <CalendarDays size={18} />
+            <span>{scheduledAppointments.length} scheduled</span>
           </div>
-	          <div className="stack-list">
-	            {appointments.filter((appointment) => appointment.status === "scheduled").slice(0, 5).map((appointment) => {
+	          <div className="stack-list dashboard-preview-list">
+	            {scheduledAppointments.length === 0 ? (
+	              <EmptyState title="No upcoming appointments" description="No scheduled visits in the current review window." />
+	            ) : visibleAppointments.map((appointment) => {
               const patient = patients.find((item) => item.id === appointment.patientId);
               return (
-                <div className="list-card" key={appointment.id}>
+                <div className="list-card dashboard-preview-card" key={appointment.id}>
                   <strong>{patient?.name || appointment.patientId}</strong>
                   <p>{appointment.date} at {appointment.time} · {appointment.type}</p>
+                  <button className="link-button" type="button" onClick={() => onSelectPatient(appointment.patientId)}>
+                    View patient
+                  </button>
                 </div>
               );
             })}
 	          </div>
+          {hiddenAppointmentCount > 0 && (
+            <button className="dashboard-more-link" type="button" onClick={() => setDashboardModal("appointments")}>
+              View {hiddenAppointmentCount}+ more
+            </button>
+          )}
 	        </article>
 	      </div>
 
@@ -870,9 +917,58 @@ function DoctorDashboardPage({
 	          ))}
 	        </div>
 	      </article>
-	    </section>
-	  );
-	}
+
+      {dashboardModal ? (
+        <div className="dashboard-modal" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
+          <button className="dashboard-modal-backdrop" type="button" aria-label="Close dashboard dialog" onClick={() => setDashboardModal(null)} />
+          <article className="dashboard-modal-panel">
+            <div className="section-title">
+              <div>
+                <span className="eyebrow">{dashboardModal === "alerts" ? `${activeAlerts.length} active` : `${scheduledAppointments.length} scheduled`}</span>
+                <h3 id="dashboard-modal-title">{dashboardModal === "alerts" ? "Alerts needing review" : "Upcoming appointments"}</h3>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setDashboardModal(null)} aria-label="Close dashboard dialog">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="dashboard-modal-scroll">
+              {dashboardModal === "alerts" ? (
+                activeAlerts.map((alert) => {
+                  const patient = patients.find((item) => item.id === alert.patientId);
+                  return (
+                    <div className="list-card" key={alert.id}>
+                      <div className="section-title">
+                        <strong>{alert.title}</strong>
+                        <SeverityBadge severity={alert.severity} />
+                      </div>
+                      <p>{patient?.name}: {alert.message}</p>
+                      <button className="link-button" type="button" onClick={() => openPatientFromModal(alert.patientId)}>
+                        View patient
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                scheduledAppointments.map((appointment) => {
+                  const patient = patients.find((item) => item.id === appointment.patientId);
+                  return (
+                    <div className="list-card" key={appointment.id}>
+                      <strong>{patient?.name || appointment.patientId}</strong>
+                      <p>{appointment.date} at {appointment.time} · {appointment.type}</p>
+                      <button className="link-button" type="button" onClick={() => openPatientFromModal(appointment.patientId)}>
+                        View patient
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </article>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 function AssignmentForm({
   patientId,
@@ -1707,50 +1803,6 @@ function PatientsRosterPage({
   );
 }
 
-function SettingsPage({ backendConnected, simulatorEnabled }: { backendConnected: boolean; simulatorEnabled: boolean }) {
-  return (
-    <section className="page-stack">
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">Workspace settings</span>
-          <h2>Settings</h2>
-          <p>Demo configuration and connection status for the hackathon presentation.</p>
-        </div>
-      </div>
-      <div className="two-column">
-        <article className="surface">
-          <div className="section-title">
-            <h3>System status</h3>
-            <span className={backendConnected ? "status-pill status-completed" : "status-pill status-assigned"}>
-              {backendConnected ? "Backend connected" : "Demo data active"}
-            </span>
-          </div>
-          <div className="stack-list">
-            <div className="list-card">
-              <strong>Simulator</strong>
-              <p>{simulatorEnabled ? "Demo simulator active. Live gesture events are generated automatically." : "Simulator paused. Manual fake gesture generation still works in live monitor."}</p>
-            </div>
-            <div className="list-card">
-              <strong>Hardware fallback</strong>
-              <p>The dashboard, patient portal, assignments, appointments, and summaries work without glove or camera input.</p>
-            </div>
-          </div>
-        </article>
-        <article className="surface">
-          <div className="section-title">
-            <h3>Demo accounts</h3>
-            <span>Prefilled login</span>
-          </div>
-          <div className="stack-list">
-            <div className="list-card"><strong>Doctor</strong><p>doctor@regrip.demo · password demo</p></div>
-            <div className="list-card"><strong>Patient</strong><p>maya@regrip.demo · password demo</p></div>
-          </div>
-        </article>
-      </div>
-    </section>
-  );
-}
-
 function GloveDevPage({ patientId }: { patientId: string }) {
   const glove = useGloveData(patientId, { hardwareOnly: true });
   const fingers = ["thumb", "index", "middle", "ring", "pinky"] as const;
@@ -2085,7 +2137,11 @@ function AppShell({
   setView,
   patient,
   onLogout,
-  currentEvent
+  currentEvent,
+  backendConnected,
+  simulatorEnabled,
+  themeMode,
+  onThemeChange
 	}: {
 	  children: React.ReactNode;
 	  view: ViewName;
@@ -2093,7 +2149,14 @@ function AppShell({
   patient: Patient;
 	  onLogout: () => void;
 	  currentEvent: GestureEvent;
+  backendConnected: boolean;
+  simulatorEnabled: boolean;
+  themeMode: ThemeMode;
+  onThemeChange: (themeMode: ThemeMode) => void;
 	}) {
+	  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+    const [settingsDialog, setSettingsDialog] = useState<"accounts" | "system-status" | null>(null);
+	  const settingsMenuRef = useRef<HTMLDivElement>(null);
 	  const topbarTitle =
 	    view === "patient"
 	      ? patient.name
@@ -2103,15 +2166,50 @@ function AppShell({
 	          ? "Appointments"
 	          : view === "patients"
 	            ? "Patients"
-	            : view === "settings"
-	              ? "Settings"
-	              : "Doctor Dashboard";
+	            : "Doctor Dashboard";
 	  const topbarSubtitle =
 	    view === "patient"
 	      ? `${patient.condition || patient.diagnosis} · ${patient.affectedHand || "right"} hand · ${String(patient.status).replace(/_/g, " ")}`
 	      : rehabGameViews.includes(view)
 	        ? `${demoDoctor.specialty} · Full Rehab Games catalog — previews are not tied to a single patient record`
 	        : `${demoDoctor.name} · Rehab workspace`;
+
+    useEffect(() => {
+      if (!settingsMenuOpen) return;
+
+      function closeOnOutsideClick(event: MouseEvent) {
+        if (settingsMenuRef.current?.contains(event.target as Node)) return;
+        setSettingsMenuOpen(false);
+      }
+
+      function closeOnEscape(event: KeyboardEvent) {
+        if (event.key === "Escape") setSettingsMenuOpen(false);
+      }
+
+      document.addEventListener("mousedown", closeOnOutsideClick);
+      document.addEventListener("keydown", closeOnEscape);
+      return () => {
+        document.removeEventListener("mousedown", closeOnOutsideClick);
+        document.removeEventListener("keydown", closeOnEscape);
+      };
+    }, [settingsMenuOpen]);
+
+    useEffect(() => {
+      if (!settingsDialog) return;
+
+      function closeOnEscape(event: KeyboardEvent) {
+        if (event.key === "Escape") setSettingsDialog(null);
+      }
+
+      document.addEventListener("keydown", closeOnEscape);
+      return () => document.removeEventListener("keydown", closeOnEscape);
+    }, [settingsDialog]);
+
+    const openSettingsDialog = (dialog: "accounts" | "system-status") => {
+      setSettingsDialog(dialog);
+      setSettingsMenuOpen(false);
+    };
+
 	  return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -2120,7 +2218,7 @@ function AppShell({
             <Activity size={21} />
           </div>
           <div>
-            <strong>ReGrip</strong>
+            <strong>Dextera</strong>
             <span>Doctor dashboard</span>
           </div>
         </div>
@@ -2153,13 +2251,85 @@ function AppShell({
 	          <div className="topbar-actions">
 	            <div className="system-pill">Demo simulator active</div>
 	            {view === "patient" || rehabGameViews.includes(view) ? <GestureBadge gesture={currentEvent.gesture} /> : null}
-	            <button className="icon-button" onClick={onLogout} title="Sign out">
-              <LogOut size={18} />
-            </button>
+            <div className="settings-menu" ref={settingsMenuRef}>
+              <button
+                className="icon-button settings-menu-trigger"
+                type="button"
+                onClick={() => setSettingsMenuOpen((open) => !open)}
+                title="Settings"
+                aria-haspopup="menu"
+                aria-expanded={settingsMenuOpen}
+              >
+                <Settings size={18} />
+              </button>
+              {settingsMenuOpen ? (
+                <div className="settings-dropdown" role="menu" aria-label="Settings menu">
+                  <button type="button" role="menuitem" onClick={() => openSettingsDialog("accounts")}>
+                    <UserRound size={17} />
+                    Accounts
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => openSettingsDialog("system-status")}>
+                    <Activity size={17} />
+                    System status
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onThemeChange(themeMode === "dark" ? "light" : "dark");
+                      setSettingsMenuOpen(false);
+                    }}
+                  >
+                    {themeMode === "dark" ? "Light mode" : "Dark mode"}
+                  </button>
+                  <button type="button" role="menuitem" className="settings-dropdown-danger" onClick={onLogout}>
+                    <LogOut size={17} />
+                    Sign out
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
         {children}
       </main>
+      {settingsDialog ? (
+        <div className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+          <button className="settings-modal-backdrop" type="button" aria-label="Close settings dialog" onClick={() => setSettingsDialog(null)} />
+          <article className="settings-modal-panel">
+            <div className="section-title">
+              <div>
+                <span className="eyebrow">Settings</span>
+                <h3 id="settings-modal-title">{settingsDialog === "accounts" ? "Accounts" : "System status"}</h3>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setSettingsDialog(null)} aria-label="Close settings dialog">
+                X
+              </button>
+            </div>
+            {settingsDialog === "accounts" ? (
+              <div className="stack-list">
+                <div className="list-card"><strong>Doctor</strong><p>doctor@dextera.demo · password demo</p></div>
+                <div className="list-card"><strong>Patient</strong><p>maya@dextera.demo · password demo</p></div>
+              </div>
+            ) : (
+              <div className="stack-list">
+                <div className="list-card">
+                  <strong>Backend</strong>
+                  <p>{backendConnected ? "Backend connected." : "Demo data active."}</p>
+                </div>
+                <div className="list-card">
+                  <strong>Simulator</strong>
+                  <p>{simulatorEnabled ? "Demo simulator active. Live gesture events are generated automatically." : "Simulator paused. Manual fake gesture generation still works in live monitor."}</p>
+                </div>
+                <div className="list-card">
+                  <strong>Hardware fallback</strong>
+                  <p>The dashboard, patient portal, assignments, appointments, and summaries work without glove or camera input.</p>
+                </div>
+              </div>
+            )}
+          </article>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2174,6 +2344,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>(demoAlerts);
   const [aiSummaries, setAiSummaries] = useState<Record<string, AiProgressSummary>>({});
   const [difficultyRecommendations, setDifficultyRecommendations] = useState<Record<string, DifficultyRecommendation>>({});
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
 
   useEffect(() => {
     if (!supabase) return;
@@ -2189,6 +2360,16 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch {
+      // Ignore storage failures; the in-memory theme still applies for this session.
+    }
+  }, [themeMode]);
+
   const [selectedPatientId, setSelectedPatientId] = useState(seedPatients[0].id);
   const [view, setView] = useState<ViewName>("dashboard");
   const [patientTab, setPatientTab] = useState<PatientTab>("overview");
@@ -2548,9 +2729,6 @@ export default function App() {
 	    if (view === "patients") {
 	      return <PatientsRosterPage patients={patients} assignments={assignments} alerts={alerts} onSelectPatient={selectPatient} />;
 	    }
-	    if (view === "settings") {
-	      return <SettingsPage backendConnected={backendConnected} simulatorEnabled={simulatorEnabled} />;
-	    }
 	    if (view === "glove-dev") {
       return <GloveDevPage patientId="demo-patient-1" />;
     }
@@ -2563,6 +2741,8 @@ export default function App() {
 	          currentEvent={currentEvent}
 	          backendConnected={backendConnected}
 	          onSessionSaved={savePatientSession}
+            themeMode={themeMode}
+            onThemeChange={setThemeMode}
 	        />
 	      );
 	    }
@@ -2669,6 +2849,8 @@ export default function App() {
         assignedGames={clinicianAssignedGames}
         clinicAppointments={clinicianAppointmentSchedule}
         onLogout={handleLogout}
+        themeMode={themeMode}
+        onThemeChange={setThemeMode}
       />
     );
   }
@@ -2679,6 +2861,10 @@ export default function App() {
       setView={setView}
       patient={selectedPatient}
       currentEvent={currentEvent}
+      backendConnected={backendConnected}
+      simulatorEnabled={simulatorEnabled}
+      themeMode={themeMode}
+      onThemeChange={setThemeMode}
       onLogout={handleLogout}
     >
       {page}

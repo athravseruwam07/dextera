@@ -1210,6 +1210,181 @@ th {
   background: var(--patient-primary);
 }
 
+.patient-portal-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  background:
+    radial-gradient(circle at 14% -8%, rgba(15, 118, 110, 0.08), transparent 30%),
+    #f5f8fb;
+  color: var(--patient-ink);
+}
+
+.patient-experience--doctor-library .patient-portal-shell {
+  min-height: calc(100vh - 72px);
+}
+
+.patient-portal-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  padding: 1.2rem 1rem;
+  border-right: 1px solid var(--patient-line);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 12px 0 32px rgba(21, 32, 51, 0.04);
+  z-index: 6;
+}
+
+.patient-experience--doctor-library .patient-portal-sidebar {
+  top: 72px;
+  height: calc(100vh - 72px);
+}
+
+.patient-portal-sidebar .sidebar-brand {
+  min-height: 56px;
+}
+
+.patient-portal-sidebar .sidebar-brand strong {
+  color: #0f172a;
+}
+
+.patient-portal-sidebar .sidebar-brand span {
+  color: #64748b;
+}
+
+.patient-side-nav {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.patient-side-nav button {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 0.72rem;
+  width: 100%;
+  padding: 0.74rem 0.82rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: #475569;
+  background: transparent;
+  font-weight: 850;
+  text-align: left;
+}
+
+.patient-side-nav button:hover {
+  border-color: #dbe6ee;
+  color: #0f766e;
+  background: #f0fdfa;
+}
+
+.patient-side-nav button.active {
+  border-color: rgba(15, 118, 110, 0.22);
+  color: #0f766e;
+  background: linear-gradient(135deg, #ecfdf5 0%, #eefcff 100%);
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+}
+
+.patient-portal-workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.patient-portal-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem clamp(1rem, 3vw, 2rem);
+  border-bottom: 1px solid var(--patient-line);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+}
+
+.patient-experience--doctor-library .patient-portal-topbar {
+  top: 72px;
+}
+
+.patient-portal-topbar strong {
+  display: block;
+  color: #0f172a;
+}
+
+.patient-portal-topbar p {
+  margin-top: 0.16rem;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.patient-portal-workspace > .page-stack {
+  width: min(100%, 1240px);
+  margin-inline: auto;
+}
+
+.settings-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.settings-menu-trigger {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-dropdown {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 50;
+  min-width: 220px;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.86) inset,
+    0 18px 40px rgba(15, 23, 42, 0.16);
+}
+
+.settings-dropdown button,
+.settings-dropdown-danger {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.58rem;
+  width: 100%;
+  padding: 0.62rem 0.72rem;
+  border-radius: 10px;
+  color: var(--ink);
+  background: transparent;
+  font-weight: 800;
+  text-align: left;
+}
+
+.settings-dropdown button:hover {
+  background: var(--surface-muted);
+}
+
+.settings-dropdown-danger {
+  color: var(--red);
+}
+
+.patient-settings-dropdown {
+  border-color: var(--patient-line);
+}
+
 .patient-utility-bar {
   position: sticky;
   top: 72px;
@@ -7587,4 +7762,253 @@ th {
     white-space: nowrap;
     font-size: 0.86rem;
   }
+
+  .patient-portal-shell,
+  .patient-experience--doctor-library .patient-portal-shell {
+    min-height: 100vh;
+    display: block;
+  }
+
+  .patient-portal-sidebar,
+  .patient-experience--doctor-library .patient-portal-sidebar {
+    position: sticky;
+    top: 0;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding: 0.75rem 1rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--patient-line);
+  }
+
+  .patient-portal-sidebar .sidebar-brand {
+    flex: 0 0 auto;
+  }
+
+  .patient-side-nav {
+    display: flex;
+    flex: 1 0 auto;
+    gap: 0.45rem;
+    min-width: max-content;
+  }
+
+  .patient-side-nav button {
+    width: auto;
+    min-height: 40px;
+    padding: 0.58rem 0.7rem;
+    white-space: nowrap;
+    font-size: 0.82rem;
+  }
+
+  .patient-portal-topbar,
+  .patient-experience--doctor-library .patient-portal-topbar {
+    top: 0;
+    align-items: flex-start;
+    padding: 0.8rem 1rem;
+  }
+
+  .patient-settings-dropdown,
+  .settings-dropdown {
+    right: 0;
+    max-width: min(280px, calc(100vw - 2rem));
+  }
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  color: #e5edf7;
+  background: #0f172a;
+  --bg: #0f172a;
+  --surface-muted: #1e293b;
+  --text: #e5edf7;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --primary: #60a5fa;
+  --primary-dark: #93c5fd;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --shadow-card: 0 18px 38px rgba(0, 0, 0, 0.22);
+  --ink: var(--text);
+  --muted: var(--text-muted);
+  --line: var(--border);
+  --surface: #111827;
+  --panel: #1e293b;
+  --blue: #60a5fa;
+  --teal: #5eead4;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --violet: #a78bfa;
+  --shadow: var(--shadow-card);
+}
+
+html[data-theme="dark"] body,
+html[data-theme="dark"] #root,
+html[data-theme="dark"] .app-shell,
+html[data-theme="dark"] .workspace,
+html[data-theme="dark"] .landing-page,
+html[data-theme="dark"] .login-screen,
+html[data-theme="dark"] .patient-experience,
+html[data-theme="dark"] .patient-portal-workspace,
+html[data-theme="dark"] .patient-game-shell {
+  background: var(--bg);
+  color: var(--text);
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .patient-tabs,
+html[data-theme="dark"] .patient-game-stage-wrap,
+html[data-theme="dark"] .game-board,
+html[data-theme="dark"] .ball-3d-board,
+html[data-theme="dark"] .bubble-pop-scene,
+html[data-theme="dark"] .piano-playfield,
+html[data-theme="dark"] .piano-lanes-board,
+html[data-theme="dark"] .carrom-board {
+  border-color: var(--line);
+  background: #0f172a;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] label,
+html[data-theme="dark"] .patient-goal,
+html[data-theme="dark"] .care-goal,
+html[data-theme="dark"] .sidebar nav button,
+html[data-theme="dark"] .patient-tabs button,
+html[data-theme="dark"] .summary-metrics span,
+html[data-theme="dark"] .chart-label,
+html[data-theme="dark"] .chart-axis {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] .patient-portal-sidebar,
+html[data-theme="dark"] .topbar,
+html[data-theme="dark"] .patient-portal-topbar,
+html[data-theme="dark"] .settings-dropdown,
+html[data-theme="dark"] .dashboard-modal-panel,
+html[data-theme="dark"] .settings-modal-panel,
+html[data-theme="dark"] .surface,
+html[data-theme="dark"] .patient-card,
+html[data-theme="dark"] .metric-card,
+html[data-theme="dark"] .list-card,
+html[data-theme="dark"] .recommendation-card,
+html[data-theme="dark"] .chart-card,
+html[data-theme="dark"] .dashboard-list-panel,
+html[data-theme="dark"] .profile-hero,
+html[data-theme="dark"] .patient-summary-card,
+html[data-theme="dark"] .patient-hero,
+html[data-theme="dark"] .assignment-card,
+html[data-theme="dark"] .rg-shell,
+html[data-theme="dark"] .rg-catalog,
+html[data-theme="dark"] .pregame-panel,
+html[data-theme="dark"] .pregame-hero,
+html[data-theme="dark"] .tutorial-page,
+html[data-theme="dark"] .cal-hero-card,
+html[data-theme="dark"] .cal-gesture-card,
+html[data-theme="dark"] .cal-finger-panel,
+html[data-theme="dark"] .checkin-sheet,
+html[data-theme="dark"] .results-panel,
+html[data-theme="dark"] .assistant-panel,
+html[data-theme="dark"] .game-header-panel,
+html[data-theme="dark"] .piano-hero,
+html[data-theme="dark"] .piano-board,
+html[data-theme="dark"] .bubble-pop-hud,
+html[data-theme="dark"] .game-completion-card,
+html[data-theme="dark"] .vr-stage,
+html[data-theme="dark"] .vr-session-hud {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .topbar,
+html[data-theme="dark"] .patient-portal-topbar,
+html[data-theme="dark"] .sidebar,
+html[data-theme="dark"] .patient-portal-sidebar {
+  background: rgba(15, 23, 42, 0.94);
+}
+
+html[data-theme="dark"] .patient-portal-shell {
+  background:
+    radial-gradient(circle at 14% -8%, rgba(94, 234, 212, 0.1), transparent 30%),
+    var(--bg);
+}
+
+html[data-theme="dark"] .patient-portal-sidebar .sidebar-brand strong,
+html[data-theme="dark"] .patient-portal-topbar strong {
+  color: var(--text);
+}
+
+html[data-theme="dark"] .patient-portal-sidebar .sidebar-brand span,
+html[data-theme="dark"] .patient-portal-topbar p,
+html[data-theme="dark"] .patient-side-nav button {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .patient-side-nav button:hover,
+html[data-theme="dark"] .patient-side-nav button.active {
+  border-color: rgba(94, 234, 212, 0.26);
+  color: var(--teal);
+  background: rgba(94, 234, 212, 0.1);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .secondary-button,
+html[data-theme="dark"] .toggle-button,
+html[data-theme="dark"] .icon-button,
+html[data-theme="dark"] .compact-game-button,
+html[data-theme="dark"] .patient-experience .secondary-button,
+html[data-theme="dark"] .patient-game-shell .secondary-button,
+html[data-theme="dark"] .patient-experience .toggle-button,
+html[data-theme="dark"] .patient-game-shell .toggle-button {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .primary-button,
+html[data-theme="dark"] .patient-experience .primary-button,
+html[data-theme="dark"] .patient-game-shell .primary-button {
+  color: #0f172a;
+  background: var(--primary);
+}
+
+html[data-theme="dark"] .settings-dropdown button,
+html[data-theme="dark"] .settings-dropdown-danger {
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .settings-dropdown-danger,
+html[data-theme="dark"] .text-danger {
+  color: var(--danger);
+}
+
+html[data-theme="dark"] .empty-state,
+html[data-theme="dark"] .inline-alert,
+html[data-theme="dark"] .step-card,
+html[data-theme="dark"] .event-chip,
+html[data-theme="dark"] .finger-row,
+html[data-theme="dark"] .calendar-mini,
+html[data-theme="dark"] .doctor-instructions,
+html[data-theme="dark"] .rg-snapshot-row,
+html[data-theme="dark"] .pregame-guidance-block,
+html[data-theme="dark"] .pregame-step-row,
+html[data-theme="dark"] .tutorial-step-card,
+html[data-theme="dark"] .cal-finger-card,
+html[data-theme="dark"] .bubble-pop-stat-chips__item,
+html[data-theme="dark"] .piano-metrics__item,
+html[data-theme="dark"] .game-completion-mini {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .dashboard-modal-backdrop,
+html[data-theme="dark"] .settings-modal-backdrop,
+html[data-theme="dark"] .game-completion-backdrop {
+  background: rgba(2, 6, 23, 0.78);
 }
