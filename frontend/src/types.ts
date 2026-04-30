@@ -20,6 +20,7 @@ export type ViewName =
   | "rehab-games"
   | "rehab-calendar"
   | "rehab-assistant"
+  | "exercises"
   | "glove-dev";
 
 export type PatientTab = "overview" | "plan" | "sessions" | "live" | "appointments" | "notes";

@@ -32,19 +32,18 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function fingerTapLanesPreset(assignment: PatientCareAssignment, accessibilityMode: boolean): FingerTapLanesPreset {
+function fingerTapLanesPreset(assignment: PatientCareAssignment): FingerTapLanesPreset {
   const { targetReps } = assignment.config;
-  const extra = accessibilityMode ? 2 : 0;
   const requiredHits = clamp(
-    Math.round(14 + Math.floor(Math.max(targetReps, 4) / 2) + extra),
+    Math.round(14 + Math.floor(Math.max(targetReps, 4) / 2)),
     14,
     26
   );
-  const maxMisses = clamp(Math.ceil(requiredHits * 0.45) + (accessibilityMode ? 2 : 0), 9, 16);
+  const maxMisses = clamp(Math.ceil(requiredHits * 0.45), 9, 16);
   return {
     requiredHits,
     maxMisses,
-    initialSpeed: accessibilityMode ? 0.146 : 0.168,
+    initialSpeed: 0.168,
     speedStepHits: 3,
     speedBump: 1.055,
     maxSpeed: 0.36,
@@ -132,17 +131,17 @@ function useSessionEventsSinceMount() {
   );
 }
 
-export function FingerTapPianoLanesGame({ assignment, accessibilityMode, onComplete }: GameProps) {
+export function FingerTapPianoLanesGame({ assignment, onComplete }: GameProps) {
   const fullscreen = usePatientGameFullscreenControls();
   const input = usePatientInput();
   const gloveControlsActive = input.rawConnected;
   const sessionEvents = useSessionEventsSinceMount();
   const preset = useMemo(
-    () => fingerTapLanesPreset(assignment, accessibilityMode),
-    [assignment, accessibilityMode]
+    () => fingerTapLanesPreset(assignment),
+    [assignment]
   );
 
-  const tileH = accessibilityMode ? 0.098 : 0.086;
+  const tileH = 0.086;
 
   const [phase, setPhase] = useState<LanePhase>("idle");
   const [paused, setPaused] = useState(false);

@@ -16,6 +16,5 @@ export type GamePlayResult = {
 
 export type PatientGameSharedProps = {
   assignment: PatientCareAssignment;
-  accessibilityMode: boolean;
   onComplete: (result: GamePlayResult) => void;
 };

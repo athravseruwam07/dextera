@@ -1,5 +1,4 @@
 import {
-  Accessibility,
   Activity,
   AlertTriangle,
   Bot,
@@ -23,6 +22,7 @@ import {
   Sparkles,
   Settings,
   TrendingUp,
+  Timer,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -76,8 +76,9 @@ import {
   createDoctorGameLibraryAssignments,
   sessionResultToRehabSession
 } from "./patientData";
+import { fingerExercises, type ExerciseAssignment, type FingerExercise } from "../data/exercises";
 
-type PatientScreen = "home" | "calendar" | "assistant";
+export type PatientScreen = "home" | "calendar" | "progress" | "assistant";
 
 type PatientRoute =
   | { step: "dashboard" }
@@ -88,6 +89,9 @@ type PatientRoute =
   | { step: "game"; assignmentId: string }
   | { step: "post-check"; assignmentId: string }
   | { step: "results"; assignmentId: string }
+  | { step: "exercise-detail"; exerciseAssignmentId: string }
+  | { step: "exercise-play"; exerciseAssignmentId: string }
+  | { step: "exercise-results"; exerciseAssignmentId: string }
   | { step: "calendar" }
   | { step: "progress" }
   | { step: "assistant" };
@@ -98,7 +102,17 @@ type AssistantMessage = {
   text: string;
 };
 
-const a11yStorageKey = "gloving.patient.accessibility.v1";
+type PatientExerciseAssignment = ExerciseAssignment & {
+  exercise: FingerExercise;
+};
+
+type ExercisePlayResult = {
+  repsCompleted: number;
+  targetReps: number;
+  accuracy: number;
+  timeTakenSeconds: number;
+  completedAt: string;
+};
 
 const fingerLabels: Record<FingerName, string> = {
   thumb: "Thumb",
@@ -157,17 +171,6 @@ function titleLabel(value: string) {
 
 function difficultyLabel(value: PatientCareAssignment["config"]["difficulty"]) {
   return titleLabel(value);
-}
-
-function loadA11y() {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(a11yStorageKey) === "true";
-}
-
-function speak(text: string) {
-  if (!("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
 
 function recentPatientSessions(patient: Patient, results: SessionResult[]) {
@@ -345,15 +348,6 @@ const CALIBRATION_GESTURES = [
   }
 ] as const;
 
-function useAccessibilityMode() {
-  const [enabled, setEnabledState] = useState(loadA11y);
-  const setEnabled = (value: boolean) => {
-    setEnabledState(value);
-    window.localStorage.setItem(a11yStorageKey, String(value));
-  };
-  return [enabled, setEnabled] as const;
-}
-
 export function PatientExperience({
   patient,
   screen,
@@ -361,8 +355,10 @@ export function PatientExperience({
   backendConnected,
   onSessionSaved,
   assignedGames,
+  assignedExercises,
   clinicAppointments,
   onLogout,
+  onNavigateScreen,
   experienceMode = "patient"
 }: {
   patient: Patient;
@@ -372,19 +368,21 @@ export function PatientExperience({
   onSessionSaved: (session: RehabSession) => void;
   /** When set (including []), replaces mock demo assignments — use clinician-assigned games for this patient only. */
   assignedGames?: PatientCareAssignment[];
+  assignedExercises?: ExerciseAssignment[];
   /** When set (including []), replaces mock demo appointments. */
   clinicAppointments?: PatientCareAppointment[];
   /** Clinician Rehab Games sidebar: full catalog preview, disconnected from roster patient assignments. */
   experienceMode?: "patient" | "doctor-library";
   onLogout?: () => void;
+  onNavigateScreen?: (screen: PatientScreen) => void;
 }) {
-  const [accessibilityMode, setAccessibilityMode] = useAccessibilityMode();
   const [route, setRoute] = useState<PatientRoute>({ step: "dashboard" });
   const [results, setResults] = useState<SessionResult[]>(() => loadSessionResults(patient.id));
   const [calibration, setCalibration] = useState<CalibrationData | undefined>();
   const [preCheck, setPreCheck] = useState<CheckIn | undefined>();
   const [postCheck, setPostCheck] = useState<CheckIn | undefined>();
   const [gameResult, setGameResult] = useState<GamePlayResult | undefined>();
+  const [exerciseResult, setExerciseResult] = useState<ExercisePlayResult | undefined>();
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   const [sessionEndedAt, setSessionEndedAt] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -402,10 +400,25 @@ export function PatientExperience({
     return createPatientAppointments(patient.id);
   }, [experienceMode, clinicAppointments, patient.id]);
 
+  const exercisePlan = useMemo<PatientExerciseAssignment[]>(() => {
+    if (experienceMode === "doctor-library") return [];
+    return (assignedExercises ?? []).flatMap((assignment) => {
+      const exercise = fingerExercises.find((item) => item.id === assignment.exerciseId);
+      return exercise ? [{ ...assignment, exercise }] : [];
+    });
+  }, [assignedExercises, experienceMode]);
+
   useEffect(() => {
     setResults(loadSessionResults(patient.id));
-    setRoute({ step: screen === "calendar" ? "calendar" : screen === "assistant" ? "assistant" : "dashboard" });
+    setRoute({
+      step: screen === "calendar" ? "calendar" : screen === "assistant" ? "assistant" : screen === "progress" ? "progress" : "dashboard"
+    });
   }, [patient.id, screen]);
+
+  const goToPatientScreen = (nextScreen: PatientScreen) => {
+    onNavigateScreen?.(nextScreen);
+    setRoute({ step: nextScreen === "home" ? "dashboard" : nextScreen });
+  };
 
   const selectedAssignment: PatientCareAssignment | undefined =
     assignments.length === 0
@@ -413,6 +426,12 @@ export function PatientExperience({
       : "assignmentId" in route
         ? assignments.find((assignment) => assignment.id === route.assignmentId) ?? assignments[0]
         : assignments[0];
+  const selectedExerciseAssignment: PatientExerciseAssignment | undefined =
+    exercisePlan.length === 0
+      ? undefined
+      : "exerciseAssignmentId" in route
+        ? exercisePlan.find((assignment) => assignment.id === route.exerciseAssignmentId) ?? exercisePlan[0]
+        : exercisePlan[0];
   const selectedGameManifest = selectedAssignment ? manifestForGame(selectedAssignment.gameId) : null;
   const openFistOnlyInput = selectedAssignment?.gameId === "ball-pickup";
   const gloveMode = selectedGameManifest?.gloveMode ?? "default";
@@ -441,6 +460,7 @@ export function PatientExperience({
     setPreCheck(undefined);
     setPostCheck(undefined);
     setGameResult(undefined);
+    setExerciseResult(undefined);
     setSessionStartedAt("");
     setSessionEndedAt("");
     setSaveState("idle");
@@ -558,6 +578,60 @@ export function PatientExperience({
       return <PatientRecoveryProgress patient={patient} assignments={assignments} results={results} />;
     }
 
+    if (route.step === "exercise-detail" || route.step === "exercise-play" || route.step === "exercise-results") {
+      if (!selectedExerciseAssignment) {
+        return (
+          <section className="page-stack patient-dashboard">
+            <div className="patient-hero">
+              <div>
+                <span className="eyebrow">Your exercises</span>
+                <h2>No exercises assigned</h2>
+                <p>Your care team has not assigned any finger exercises yet.</p>
+              </div>
+            </div>
+          </section>
+        );
+      }
+
+      if (route.step === "exercise-detail") {
+        return (
+          <PatientExerciseDetail
+            assignment={selectedExerciseAssignment}
+            onBack={() => setRoute({ step: "dashboard" })}
+            onStart={() => {
+              setExerciseResult(undefined);
+              setRoute({ step: "exercise-play", exerciseAssignmentId: selectedExerciseAssignment.id });
+            }}
+          />
+        );
+      }
+
+      if (route.step === "exercise-play") {
+        return (
+          <PatientExerciseSession
+            assignment={selectedExerciseAssignment}
+            onBack={() => setRoute({ step: "exercise-detail", exerciseAssignmentId: selectedExerciseAssignment.id })}
+            onComplete={(result) => {
+              setExerciseResult(result);
+              setRoute({ step: "exercise-results", exerciseAssignmentId: selectedExerciseAssignment.id });
+            }}
+          />
+        );
+      }
+
+      return (
+        <PatientExerciseResults
+          assignment={selectedExerciseAssignment}
+          result={exerciseResult}
+          onReplay={() => {
+            setExerciseResult(undefined);
+            setRoute({ step: "exercise-play", exerciseAssignmentId: selectedExerciseAssignment.id });
+          }}
+          onDashboard={() => setRoute({ step: "dashboard" })}
+        />
+      );
+    }
+
     const stepNeedsAssignment =
       route.step === "detail" ||
       route.step === "tutorial" ||
@@ -607,7 +681,6 @@ export function PatientExperience({
       return (
         <TutorialPage
           assignment={a}
-          accessibilityMode={accessibilityMode}
           onBack={() => setRoute({ step: "detail", assignmentId: a.id })}
           onContinue={() => {
             resetSessionState();
@@ -620,7 +693,6 @@ export function PatientExperience({
       return (
         <CalibrationScreen
           assignment={a}
-          accessibilityMode={accessibilityMode}
           onBack={() => setRoute({ step: "detail", assignmentId: a.id })}
           onComplete={(value) => {
             setCalibration(value);
@@ -649,7 +721,6 @@ export function PatientExperience({
       return (
         <PatientGame
           assignment={a}
-          accessibilityMode={accessibilityMode}
           onComplete={(value) => {
             setGameResult(value);
             setSessionEndedAt(new Date().toISOString());
@@ -693,10 +764,12 @@ export function PatientExperience({
         <PatientDashboard
           patient={patient}
           assignments={assignments}
+          exerciseAssignments={exercisePlan}
           appointments={appointments}
           results={results}
           experienceMode={experienceMode}
           onOpenAssignment={(assignmentId) => beginAssignment(assignmentId)}
+          onOpenExercise={(exerciseAssignmentId) => setRoute({ step: "exercise-detail", exerciseAssignmentId })}
         />
     );
   })();
@@ -709,18 +782,15 @@ export function PatientExperience({
       openFistOnly={openFistOnlyInput}
       gloveMode={gloveMode}
       sessionId={"assignmentId" in route ? route.assignmentId : undefined}
-      slowMode={accessibilityMode}
     >
-      <section className={`patient-experience patient-experience--${experienceMode} ${accessibilityMode ? "patient-a11y" : ""}`}>
+      <section className={`patient-experience patient-experience--${experienceMode}`}>
         <PatientPortalShell
           patient={patient}
           activeRoute={route.step}
-          onHome={() => setRoute({ step: "dashboard" })}
-          onCalendar={() => setRoute({ step: "calendar" })}
-          onProgress={() => setRoute({ step: "progress" })}
-          onAssistant={() => setRoute({ step: "assistant" })}
-          accessibilityMode={accessibilityMode}
-          setAccessibilityMode={setAccessibilityMode}
+          onHome={() => goToPatientScreen("home")}
+          onCalendar={() => goToPatientScreen("calendar")}
+          onProgress={() => goToPatientScreen("progress")}
+          onAssistant={() => goToPatientScreen("assistant")}
           onLogout={onLogout}
         >
           {content}
@@ -737,8 +807,6 @@ function PatientPortalShell({
   onCalendar,
   onProgress,
   onAssistant,
-  accessibilityMode,
-  setAccessibilityMode,
   children,
   onLogout
 }: {
@@ -748,8 +816,6 @@ function PatientPortalShell({
   onCalendar: () => void;
   onProgress: () => void;
   onAssistant: () => void;
-  accessibilityMode: boolean;
-  setAccessibilityMode: (value: boolean) => void;
   children: React.ReactNode;
   onLogout?: () => void;
 }) {
@@ -783,11 +849,6 @@ function PatientPortalShell({
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [settingsOpen]);
-
-  const toggleAccessibility = () => {
-    setAccessibilityMode(!accessibilityMode);
-    setSettingsOpen(false);
-  };
 
   return (
     <div className="patient-portal-shell">
@@ -841,10 +902,6 @@ function PatientPortalShell({
             </button>
             {settingsOpen ? (
               <div className="settings-dropdown patient-settings-dropdown" role="menu" aria-label="Patient settings menu">
-                <button type="button" role="menuitem" onClick={toggleAccessibility}>
-                  <Accessibility size={17} />
-                  {accessibilityMode ? "Standard Mode" : "Accessibility"}
-                </button>
                 {onLogout ? (
                   <button type="button" role="menuitem" className="settings-dropdown-danger" onClick={onLogout}>
                     <LogOut size={17} />
@@ -864,17 +921,21 @@ function PatientPortalShell({
 function PatientDashboard({
   patient,
   assignments,
+  exerciseAssignments,
   appointments,
   results,
   experienceMode,
-  onOpenAssignment
+  onOpenAssignment,
+  onOpenExercise
 }: {
   patient: Patient;
   assignments: PatientCareAssignment[];
+  exerciseAssignments: PatientExerciseAssignment[];
   appointments: PatientCareAppointment[];
   results: SessionResult[];
   experienceMode: "patient" | "doctor-library";
   onOpenAssignment: (assignmentId: string) => void;
+  onOpenExercise: (exerciseAssignmentId: string) => void;
 }) {
   const sessions = recentPatientSessions(patient, results);
   const weekStart = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -1018,6 +1079,42 @@ function PatientDashboard({
           )}
         </article>
 
+        <article className="surface">
+          <div className="section-title">
+            <h3>Finger Exercises</h3>
+            <span>{exerciseAssignments.length} Drills</span>
+          </div>
+          {exerciseAssignments.length === 0 ? (
+            <EmptyState title="No finger exercises assigned" detail="Assigned finger drills will appear here." />
+          ) : (
+            <div className="assignment-grid exercise-plan-grid">
+              {exerciseAssignments.map((assignment) => {
+                const exercise = assignment.exercise;
+                return (
+                  <article className="assignment-card exercise-plan-card" key={assignment.id}>
+                    <div className="assignment-card-top">
+                      <div className="assignment-icon"><Hand size={20} /></div>
+                      <span className="status-pill status-review">Due</span>
+                    </div>
+                    <h3>{exercise.name}</h3>
+                    <p>{exercise.description}</p>
+                    <div className="assignment-meta">
+                      <span>{exercise.reps} Reps</span>
+                      <span>{exercise.fingers.map((finger) => fingerLabels[finger]).join(" + ")}</span>
+                      <span>{difficultyLabel(exercise.difficulty)}</span>
+                    </div>
+                    <div className="assignment-actions">
+                      <button type="button" className="secondary-button" onClick={() => onOpenExercise(assignment.id)}>
+                        View Details
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </article>
+
         <aside className="surface patient-side-panel">
           <div className="section-title">
             <h3>Doctor Notes</h3>
@@ -1036,6 +1133,239 @@ function PatientDashboard({
           </div>
         </aside>
       </div>
+    </section>
+  );
+}
+
+function PatientExerciseDetail({
+  assignment,
+  onBack,
+  onStart
+}: {
+  assignment: PatientExerciseAssignment;
+  onBack: () => void;
+  onStart: () => void;
+}) {
+  const exercise = assignment.exercise;
+  return (
+    <section className="page-stack patient-exercise-detail">
+      <BackButton onBack={onBack} label="Plan" />
+      <header className="pregame-hero patient-exercise-hero" aria-labelledby="exercise-title">
+        <div className="pregame-hero-grid">
+          <div className="pregame-hero-copy">
+            <span className="eyebrow">Finger exercise</span>
+            <h2 className="pregame-hero-title" id="exercise-title">{exercise.name}</h2>
+            <p className="pregame-hero-sub">{exercise.description}</p>
+            <div className="pregame-chip-row" aria-label="Exercise parameters">
+              <span className="pregame-chip pregame-chip--reps">
+                <Repeat size={14} strokeWidth={2.25} aria-hidden /> {exercise.reps} reps
+              </span>
+              <span className="pregame-chip pregame-chip--level">
+                <Gauge size={14} strokeWidth={2.25} aria-hidden /> {difficultyLabel(exercise.difficulty)}
+              </span>
+              <span className="pregame-chip pregame-chip--schedule">
+                <Hand size={14} strokeWidth={2.25} aria-hidden /> {exercise.fingers.map((finger) => fingerLabels[finger]).join(" + ")}
+              </span>
+            </div>
+            <div className="pregame-hero-actions">
+              <button type="button" className="primary-button pregame-hero-cta" onClick={onStart}>
+                <Play size={18} />
+                Start Exercise
+              </button>
+            </div>
+          </div>
+          <aside className="patient-exercise-preview" aria-hidden>
+            {fingerNames.map((finger) => (
+              <span key={finger} className={exercise.fingers.includes(finger) ? "is-target" : ""}>
+                {fingerLabels[finger]}
+              </span>
+            ))}
+          </aside>
+        </div>
+      </header>
+
+      <section className="pregame-lower">
+        <div className="pregame-quick-section">
+          <h3>How to do it</h3>
+          <ol className="pregame-instruction-list">
+            <li>Relax your hand open before each rep.</li>
+            <li>Bend only the highlighted finger or finger group.</li>
+            <li>Release back to open before starting the next rep.</li>
+          </ol>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function PatientExerciseSession({
+  assignment,
+  onBack,
+  onComplete
+}: {
+  assignment: PatientExerciseAssignment;
+  onBack: () => void;
+  onComplete: (result: ExercisePlayResult) => void;
+}) {
+  const input = usePatientInput();
+  const exercise = assignment.exercise;
+  const startedAtRef = useRef(Date.now());
+  const pressedRef = useRef(false);
+  const [reps, setReps] = useState(0);
+  const [attempts, setAttempts] = useState(0);
+  const [feedback, setFeedback] = useState("Open your hand, then bend the target fingers.");
+  const targetSet = useMemo(() => new Set<FingerName>(exercise.fingers), [exercise.fingers]);
+  const nonTargetFingers = useMemo(() => fingerNames.filter((finger) => !targetSet.has(finger)), [targetSet]);
+  const targetAverage = Math.round(exercise.fingers.reduce((sum, finger) => sum + input.fingerBends[finger], 0) / exercise.fingers.length);
+  const nonTargetAverage = nonTargetFingers.length
+    ? Math.round(nonTargetFingers.reduce((sum, finger) => sum + input.fingerBends[finger], 0) / nonTargetFingers.length)
+    : 0;
+  const progress = Math.min(100, Math.round((reps / exercise.reps) * 100));
+
+  useEffect(() => {
+    if (reps >= exercise.reps) return;
+    const targetPressed = exercise.fingers.every((finger) => input.fingerBends[finger] >= 55);
+    const otherRelaxed = nonTargetFingers.every((finger) => input.fingerBends[finger] <= 52);
+    const released = exercise.fingers.every((finger) => input.fingerBends[finger] <= 35);
+
+    if (!pressedRef.current && targetPressed && otherRelaxed) {
+      pressedRef.current = true;
+      setAttempts((value) => value + 1);
+      setFeedback("Good hold. Open your hand to finish the rep.");
+      return;
+    }
+
+    if (pressedRef.current && released) {
+      pressedRef.current = false;
+      setReps((value) => {
+        const next = Math.min(exercise.reps, value + 1);
+        setFeedback(next >= exercise.reps ? "Exercise complete." : "Rep counted. Bend again when ready.");
+        return next;
+      });
+    } else if (!pressedRef.current && targetPressed && !otherRelaxed) {
+      setFeedback("Try to keep the non-target fingers relaxed.");
+    }
+  }, [exercise.fingers, exercise.reps, input.fingerBends, nonTargetFingers, reps]);
+
+  useEffect(() => {
+    if (reps < exercise.reps) return;
+    const timeTakenSeconds = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+    onComplete({
+      repsCompleted: reps,
+      targetReps: exercise.reps,
+      accuracy: Math.max(60, Math.min(100, Math.round((reps / Math.max(1, attempts)) * 100))),
+      timeTakenSeconds,
+      completedAt: new Date().toISOString()
+    });
+  }, [attempts, exercise.reps, onComplete, reps]);
+
+  const demoRep = () => {
+    const bent = fingerNames.reduce<FingerBends>(
+      (values, finger) => {
+        values[finger] = targetSet.has(finger) ? 82 : 12;
+        return values;
+      },
+      { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 }
+    );
+    input.emitGesture(input.currentGesture, bent);
+    window.setTimeout(() => input.emitGesture("open"), 260);
+  };
+
+  return (
+    <section className="page-stack patient-exercise-play">
+      <BackButton onBack={onBack} label="Exercise Detail" />
+      <article className="surface patient-exercise-session">
+        <div className="section-title">
+          <div>
+            <span className="eyebrow">Exercise in progress</span>
+            <h2>{exercise.name}</h2>
+          </div>
+          <span className="status-pill status-active">{reps}/{exercise.reps} reps</span>
+        </div>
+
+        <div className="exercise-progress-track" aria-label={`${progress}% complete`}>
+          <span style={{ width: `${progress}%` }} />
+        </div>
+
+        <div className="exercise-live-grid">
+          <div className="exercise-live-target">
+            <strong>{feedback}</strong>
+            <p>{exercise.fingers.map((finger) => fingerLabels[finger]).join(" + ")}</p>
+            <div className="exercise-live-stat-row">
+              <span>Target bend {targetAverage}%</span>
+              <span>Other fingers {nonTargetAverage}%</span>
+              <span>{input.rawConnected ? "Glove connected" : "Demo stream"}</span>
+            </div>
+          </div>
+          <div className="exercise-finger-meter-list">
+            {fingerNames.map((finger) => (
+              <div className={targetSet.has(finger) ? "exercise-finger-meter is-target" : "exercise-finger-meter"} key={finger}>
+                <span>{fingerLabels[finger]}</span>
+                <div>
+                  <i style={{ width: `${Math.max(0, Math.min(100, input.fingerBends[finger]))}%` }} />
+                </div>
+                <strong>{Math.round(input.fingerBends[finger])}%</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="exercise-session-actions">
+          <button type="button" className="secondary-button" onClick={demoRep}>
+            Demo Rep
+          </button>
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function PatientExerciseResults({
+  assignment,
+  result,
+  onReplay,
+  onDashboard
+}: {
+  assignment: PatientExerciseAssignment;
+  result?: ExercisePlayResult;
+  onReplay: () => void;
+  onDashboard: () => void;
+}) {
+  const exercise = assignment.exercise;
+  return (
+    <section className="page-stack">
+      <article className="surface results-page patient-exercise-results">
+        <div className="section-title">
+          <div>
+            <span className="eyebrow">Exercise complete</span>
+            <h2>{exercise.name}</h2>
+          </div>
+        </div>
+        <div className="result-grid">
+          <article className="metric-card tone-teal">
+            <div className="metric-icon"><CheckCircle2 size={20} /></div>
+            <span>Reps</span>
+            <strong>{result?.repsCompleted ?? 0}/{result?.targetReps ?? exercise.reps}</strong>
+            <small>Completed</small>
+          </article>
+          <article className="metric-card tone-blue">
+            <div className="metric-icon"><Gauge size={20} /></div>
+            <span>Accuracy</span>
+            <strong>{result?.accuracy ?? 0}%</strong>
+            <small>Target isolation</small>
+          </article>
+          <article className="metric-card tone-amber">
+            <div className="metric-icon"><Timer size={20} /></div>
+            <span>Time</span>
+            <strong>{result?.timeTakenSeconds ?? 0}s</strong>
+            <small>Practice duration</small>
+          </article>
+        </div>
+        <div className="result-actions">
+          <button type="button" className="secondary-button" onClick={onReplay}>Repeat Exercise</button>
+          <button type="button" className="primary-button" onClick={onDashboard}>Back to Plan</button>
+        </div>
+      </article>
     </section>
   );
 }
@@ -1147,12 +1477,10 @@ function AssignmentDetail({
 
 function TutorialPage({
   assignment,
-  accessibilityMode,
   onBack,
   onContinue
 }: {
   assignment: PatientCareAssignment;
-  accessibilityMode: boolean;
   onBack: () => void;
   onContinue: () => void;
 }) {
@@ -1168,7 +1496,6 @@ function TutorialPage({
           </div>
         </div>
         <TutorialSteps assignment={assignment} />
-        {accessibilityMode && <p className="safe-note">Voice prompts are enabled where the browser supports text-to-speech.</p>}
         <button type="button" className="primary-button" onClick={onContinue}>
           Continue
         </button>
@@ -1206,13 +1533,11 @@ function TutorialSteps({ assignment, compact = false, pregame = false }: { assig
 
 function CalibrationScreen({
   assignment,
-  accessibilityMode,
   onBack,
   onComplete,
   onSkip
 }: {
   assignment: PatientCareAssignment;
-  accessibilityMode: boolean;
   onBack: () => void;
   onComplete: (calibration: CalibrationData) => void;
   onSkip: () => void;
@@ -1281,11 +1606,9 @@ function CalibrationScreen({
   const captureTarget = (target: CalibrationTarget, values: FingerBends) => {
     if (target.kind === "step") {
       setSteps((items) => ({ ...items, [target.step]: values }));
-      if (accessibilityMode) speak(`${target.label} captured`);
       return;
     }
     setFingerTaps((items) => ({ ...items, [target.finger]: values }));
-    if (accessibilityMode) speak(`${target.label} captured`);
   };
 
   const resetActiveHold = () => {
@@ -1376,7 +1699,6 @@ function CalibrationScreen({
     activeSamplesRef.current = [];
     sampleKeysRef.current = new Set();
     setCalibrationPhase("prepare");
-    if (accessibilityMode) speak("Calibration started");
   };
 
   const beginCurrentHold = () => {
@@ -1385,7 +1707,6 @@ function CalibrationScreen({
     setFeedbackTarget(null);
     resetActiveHold();
     setCalibrationPhase("hold");
-    if (accessibilityMode) speak(`Hold ${activeTarget.label}`);
   };
 
   const prepareNextTarget = () => {

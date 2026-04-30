@@ -32,7 +32,6 @@ export type { GamePlayResult } from "./gameTypes";
 
 type GameProps = {
   assignment: PatientCareAssignment;
-  accessibilityMode: boolean;
   onComplete: (result: GamePlayResult) => void;
 };
 
@@ -143,12 +142,10 @@ function Cursor({ position }: { position: HandPosition }) {
 /** Minimal fingertip tracker for Bubble Pop — ring + halo, no hand illustration. */
 function BubblePopAimCursor({
   position,
-  gesture,
-  accessible
+  gesture
 }: {
   position: HandPosition;
   gesture: GestureName;
-  accessible: boolean;
 }) {
   const mode =
     gesture === "pinch"
@@ -159,7 +156,7 @@ function BubblePopAimCursor({
 
   return (
     <div
-      className={`bubble-pop-aim-cursor ${mode}${accessible ? " bubble-pop-aim-cursor--accessible" : ""}`}
+      className={`bubble-pop-aim-cursor ${mode}`}
       style={{ left: `${position.x}%`, top: `${position.y}%` }}
       aria-hidden="true"
     >
@@ -267,7 +264,6 @@ function GameCompletionCelebration({
 
 export function PatientGame({
   assignment,
-  accessibilityMode,
   onComplete
 }: GameProps) {
   const games: Record<GameId, ComponentType<GameProps>> = {
@@ -375,7 +371,6 @@ export function PatientGame({
         <div className={`patient-game-stage-wrap${completionResult ? " patient-game-stage-wrap--paused" : ""}`}>
           <Component
             assignment={assignment}
-            accessibilityMode={accessibilityMode}
             onComplete={handleGameCompletion}
           />
         </div>
@@ -425,7 +420,7 @@ function currentAccuracy(successes: number, failed: number) {
   return clampPercent((successes / Math.max(successes + failed, 1)) * 100);
 }
 
-function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps) {
+function BallPickupGame({ assignment, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
@@ -449,9 +444,9 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
   const [successFlash, setSuccessFlash] = useState(false);
   const [feedback, setFeedback] = useState("Move the hand above the ball, then make a fist to pick it up.");
   const targetReps = assignment.config.targetReps;
-  const ballRadius = accessibilityMode ? 0.34 : 0.26;
-  const basketRadius = accessibilityMode ? 0.98 : 0.68;
-  const grabRadius = accessibilityMode ? 0.86 : 0.58;
+  const ballRadius = 0.26;
+  const basketRadius = 0.68;
+  const grabRadius = 0.58;
   const handWorld = handPositionToWorld(input.handPosition);
   const ballDistance = distance3D(handWorld, ballPosition);
   const canReachBall = ballDistance <= grabRadius;
@@ -509,7 +504,7 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
       };
       if (!direction.x && !direction.y) return;
       event.preventDefault();
-      const step = accessibilityMode ? 4 : 6;
+      const step = 6;
       input.setHandPosition({
         x: input.handPosition.x + direction.x * step,
         y: input.handPosition.y + direction.y * step,
@@ -519,7 +514,7 @@ function BallPickupGame({ assignment, accessibilityMode, onComplete }: GameProps
 
     window.addEventListener("keydown", moveByKeyboard);
     return () => window.removeEventListener("keydown", moveByKeyboard);
-  }, [accessibilityMode, input, roundActive]);
+  }, [input, roundActive]);
 
   useEffect(() => {
     if (held) return;
@@ -1100,23 +1095,21 @@ type PianoPreset = {
   timeLimitSeconds: number | null;
 };
 
-function fingerTapPianoPreset(assignment: PatientCareAssignment, accessibilityMode: boolean): PianoPreset {
+function fingerTapPianoPreset(assignment: PatientCareAssignment): PianoPreset {
   const { difficulty, targetReps } = assignment.config;
   if (difficulty !== "easy" && difficulty !== "medium") {
     throw new Error("fingerTapPianoPreset: classic mode supports only Easy or Medium");
   }
   const tier = difficulty === "easy" ? 10 : 14;
   const requiredHits = clamp(
-    Math.round(tier + Math.floor(Math.max(targetReps, 4) / 2) + (accessibilityMode ? 1 : 0)),
+    Math.round(tier + Math.floor(Math.max(targetReps, 4) / 2)),
     10,
     20
   );
   const holdRequiredMs =
     difficulty === "easy"
       ? 0
-      : accessibilityMode
-        ? 150
-        : 120;
+      : 120;
   const restEveryHits = difficulty === "easy" ? 8 : 6;
   const restSeconds = difficulty === "easy" ? 12 : 9;
   const timeLimitSeconds = null;
@@ -1182,20 +1175,20 @@ const emptyFingerCounts = (): Record<FingerName, number> => ({
 /** One-hand C-major pentatonic layout (thumb → pinky) for UI labels — matches ebony stagger on the keyboard */
 const PIANO_WHITE_KEY_NOTES = ["C", "D", "E", "F", "G"] as const;
 
-function FingerTapPianoGame({ assignment, accessibilityMode, onComplete }: GameProps) {
+function FingerTapPianoGame({ assignment, onComplete }: GameProps) {
   if (assignment.config.difficulty === "hard") {
-    return <FingerTapPianoLanesGame assignment={assignment} accessibilityMode={accessibilityMode} onComplete={onComplete} />;
+    return <FingerTapPianoLanesGame assignment={assignment} onComplete={onComplete} />;
   }
-  return <FingerTapPianoClassicGame assignment={assignment} accessibilityMode={accessibilityMode} onComplete={onComplete} />;
+  return <FingerTapPianoClassicGame assignment={assignment} onComplete={onComplete} />;
 }
 
-function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }: GameProps) {
+function FingerTapPianoClassicGame({ assignment, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const gloveControlsActive = input.rawConnected;
   const preset = useMemo(
-    () => fingerTapPianoPreset(assignment, accessibilityMode),
-    [assignment, accessibilityMode]
+    () => fingerTapPianoPreset(assignment),
+    [assignment]
   );
 
   const [phase, setPhase] = useState<PianoPhase>("idle");
@@ -1589,7 +1582,7 @@ function FingerTapPianoClassicGame({ assignment, accessibilityMode, onComplete }
       ? 0
       : clamp((play.hits / Math.max(preset.requiredHits, 1)) * 100, 0, 100);
 
-  const inputModeLabel = gloveControlsActive ? "Glove connected" : accessibilityMode ? "Accessibility" : "Demo controls";
+  const inputModeLabel = gloveControlsActive ? "Glove connected" : "Demo controls";
   const holdModeLabel = holdRequired ? `${preset.holdRequiredMs} ms hold` : "Quick tap";
   const difficultyTitle = difficultyLabel(assignment.config.difficulty);
 
@@ -2069,8 +2062,8 @@ function createBubblePopItem(seed: number, index: number, pos: Point) {
   };
 }
 
-function makeBubbles(seed: number, accessibilityMode: boolean) {
-  const margin = accessibilityMode ? 12.5 : 10;
+function makeBubbles(seed: number) {
+  const margin = 10;
   const pts = buildNonOverlappingLayout(seed, margin);
   return pts.map((pos, index) => createBubblePopItem(seed, index, pos));
 }
@@ -2078,8 +2071,8 @@ function makeBubbles(seed: number, accessibilityMode: boolean) {
 /**
  * Spawn one bubble after another was removed; position must avoid existing centers.
  */
-function makeReplacementBubble(seed: number, existingCenters: Point[], accessibilityMode: boolean) {
-  const margin = accessibilityMode ? 12.5 : 10;
+function makeReplacementBubble(seed: number, existingCenters: Point[]) {
+  const margin = 10;
 
   function bestAnchorFromSlots(): Point {
     let pick: Point = { x: 50, y: 45 };
@@ -2149,15 +2142,15 @@ function makeReplacementBubble(seed: number, existingCenters: Point[], accessibi
   return createBubblePopItem(seed, 0, p);
 }
 
-function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps) {
+function BubblePopGame({ assignment, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
   const processedEventRef = useRef("");
   const targetReps = assignment.config.targetReps;
-  const initialTime = accessibilityMode ? 75 : 50;
+  const initialTime = 50;
   const [phase, setPhase] = useState<"ready" | "playing" | "paused">("ready");
-  const [bubbles, setBubbles] = useState(() => makeBubbles(1, accessibilityMode));
+  const [bubbles, setBubbles] = useState(() => makeBubbles(1));
   const [seed, setSeed] = useState(2);
   const [popped, setPopped] = useState(0);
   const [missed, setMissed] = useState(0);
@@ -2165,9 +2158,9 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
   const [tapFx, setTapFx] = useState<Partial<Record<string, "ok" | "bad">>>({});
   const lastSuccessfulPopAtRef = useRef<number | null>(null);
   const popIntervalsRef = useRef<number[]>([]);
-  const popRadius = accessibilityMode ? 16 : 10;
+  const popRadius = 10;
   /** Half-diameter in normalized 0–100 coords; matches ~clamp(72px, 10vw, 120px) bubbles on typical boards */
-  const bubbleHitHalf = accessibilityMode ? 8.25 : 7;
+  const bubbleHitHalf = 7;
 
   const progressPct = clamp((popped / Math.max(targetReps, 1)) * 100, 0, 100);
   const gameActive = phase === "playing";
@@ -2177,12 +2170,12 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
     lastSuccessfulPopAtRef.current = null;
     popIntervalsRef.current = [];
     setSeed(2);
-    setBubbles(makeBubbles(1, accessibilityMode));
+    setBubbles(makeBubbles(1));
     setPopped(0);
     setMissed(0);
     setTimeLeft(initialTime);
     setTapFx({});
-  }, [accessibilityMode, initialTime]);
+  }, [initialTime]);
 
   const startRound = useCallback(() => {
     resetRound();
@@ -2264,7 +2257,7 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
     setBubbles((items) => {
       const rest = items.filter((bubble) => bubble.id !== nearest.id);
       const centers = rest.map(({ x, y }) => ({ x, y }));
-      const incoming = makeReplacementBubble(nextSeed, centers, accessibilityMode);
+      const incoming = makeReplacementBubble(nextSeed, centers);
       return [...rest, incoming];
     });
 
@@ -2283,7 +2276,6 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
       setMissed((value) => value + 1);
     }
   }, [
-    accessibilityMode,
     bubbles,
     finishBubbleRound,
     input.events,
@@ -2307,7 +2299,7 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
       };
       if (!direction.x && !direction.y) return;
       event.preventDefault();
-      const step = accessibilityMode ? 4 : 6;
+      const step = 6;
       input.setHandPosition({
         x: input.handPosition.x + direction.x * step,
         y: input.handPosition.y + direction.y * step,
@@ -2316,10 +2308,10 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [accessibilityMode, input, phase]);
+  }, [input, phase]);
 
   return (
-    <section className={`bubble-pop-shell${accessibilityMode ? " bubble-pop-shell--accessible" : ""}`} aria-label="Bubble Pop game">
+    <section className="bubble-pop-shell" aria-label="Bubble Pop game">
       <header className="bubble-pop-hud">
         <div className="bubble-pop-hud__top">
           <div className="bubble-pop-hud__brand">
@@ -2468,7 +2460,7 @@ function BubblePopGame({ assignment, accessibilityMode, onComplete }: GameProps)
           })}
         </div>
 
-        <BubblePopAimCursor position={input.handPosition} gesture={input.currentGesture} accessible={accessibilityMode} />
+        <BubblePopAimCursor position={input.handPosition} gesture={input.currentGesture} />
         {phase === "ready" && (
           <div className="bubble-pop-overlay">
             <div>
@@ -2907,7 +2899,7 @@ function resolveCarromShot(
   };
 }
 
-function CarromGame({ assignment, accessibilityMode, onComplete }: GameProps) {
+function CarromGame({ assignment, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
@@ -2978,9 +2970,9 @@ function CarromGame({ assignment, accessibilityMode, onComplete }: GameProps) {
     const length = Math.max(0.1, Math.hypot(dx, dy));
     return {
       angle: Math.atan2(dy, dx),
-      power: clamp(length / 3.2, accessibilityMode ? 0.35 : 0.2, 1)
+      power: clamp(length / 3.2, 0.2, 1)
     };
-  }, [accessibilityMode, boardPoint, striker.x, striker.y]);
+  }, [boardPoint, striker.x, striker.y]);
 
   const enterFullscreen = async () => {
     const board = boardRef.current;

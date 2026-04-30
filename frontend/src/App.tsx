@@ -89,7 +89,7 @@ import type {
   SessionDraft,
   ViewName
 } from "./types";
-import { PatientExperience } from "./patient/PatientExperience";
+import { PatientExperience, type PatientScreen } from "./patient/PatientExperience";
 import { useGloveData } from "./lib/useGloveData";
 import { Canvas } from "@react-three/fiber";
 import { HandModel3D } from "./vr/components/HandModel3D";
@@ -101,11 +101,86 @@ import {
   doctorAssignmentsToPatientCare,
 } from "./patient/patientData";
 import heroImage from "./assets/dextera-hero.png";
+import { ExercisesPage } from "./exercises/ExercisesPage";
+import type { ExerciseAssignment } from "./data/exercises";
 
 type AuthRole = "doctor" | "patient";
 type EntryScreen = "landing" | "login";
 
+type AppRoute =
+  | { kind: "landing" }
+  | { kind: "sign-in"; role: AuthRole }
+  | { kind: "doctor"; view: ViewName; patientId?: string; patientTab?: PatientTab }
+  | { kind: "patient"; screen: PatientScreen };
+
 const rehabGameViews: ViewName[] = ["rehab-games", "rehab-calendar", "rehab-assistant"];
+
+const doctorViewPaths: Partial<Record<ViewName, string>> = {
+  dashboard: "/doctor/dashboard",
+  patients: "/doctor/patients",
+  appointments: "/doctor/appointments",
+  "rehab-games": "/doctor/rehab-games",
+  "rehab-calendar": "/doctor/rehab-calendar",
+  "rehab-assistant": "/doctor/rehab-assistant",
+  exercises: "/doctor/exercises",
+  "glove-dev": "/doctor/glove-dev"
+};
+
+const patientScreenPaths: Record<PatientScreen, string> = {
+  home: "/patient/plan",
+  calendar: "/patient/calendar",
+  progress: "/patient/progress",
+  assistant: "/patient/assistant"
+};
+
+function normalizePathname(pathname: string) {
+  const clean = pathname.replace(/\/+$/, "");
+  return clean || "/";
+}
+
+function pathForDoctorView(view: ViewName, patientId: string, patientTab: PatientTab) {
+  if (view === "patient") return `/doctor/patients/${encodeURIComponent(patientId)}/${patientTab}`;
+  return doctorViewPaths[view] ?? "/doctor/dashboard";
+}
+
+function parseAppRoute(pathname: string): AppRoute {
+  const path = normalizePathname(pathname);
+  const segments = path.split("/").filter(Boolean);
+  if (path === "/") return { kind: "landing" };
+  if (path === "/doctor/sign-in") return { kind: "sign-in", role: "doctor" };
+  if (path === "/patient/sign-in") return { kind: "sign-in", role: "patient" };
+
+  if (segments[0] === "patient") {
+    const screen = segments[1] as PatientScreen | undefined;
+    if (screen === "calendar" || screen === "progress" || screen === "assistant") return { kind: "patient", screen };
+    return { kind: "patient", screen: "home" };
+  }
+
+  if (segments[0] === "doctor") {
+    if (segments[1] === "patients" && segments[2]) {
+      const tab = segments[3] as PatientTab | undefined;
+      return {
+        kind: "doctor",
+        view: "patient",
+        patientId: decodeURIComponent(segments[2]),
+        patientTab: tab === "plan" || tab === "sessions" || tab === "live" || tab === "appointments" || tab === "notes" ? tab : "overview"
+      };
+    }
+    const viewBySegment: Record<string, ViewName> = {
+      dashboard: "dashboard",
+      patients: "patients",
+      appointments: "appointments",
+      "rehab-games": "rehab-games",
+      "rehab-calendar": "rehab-calendar",
+      "rehab-assistant": "rehab-assistant",
+      exercises: "exercises",
+      "glove-dev": "glove-dev"
+    };
+    return { kind: "doctor", view: viewBySegment[segments[1] ?? "dashboard"] ?? "dashboard" };
+  }
+
+  return { kind: "landing" };
+}
 
 function sideNavActive(navId: ViewName, current: ViewName) {
   if (navId === "rehab-games") return rehabGameViews.includes(current);
@@ -121,6 +196,7 @@ const viewItems: Array<{
   { id: "patients", label: "Patients", icon: Users },
   { id: "appointments", label: "Appointments", icon: CalendarDays },
   { id: "rehab-games", label: "Rehab Games", icon: Home },
+  { id: "exercises", label: "Exercises", icon: Sparkles },
   { id: "glove-dev", label: "Glove Dev", icon: Activity }
 ];
 
@@ -387,10 +463,6 @@ function LandingPage({ onSelectRole }: { onSelectRole: (role: AuthRole) => void 
               <Play size={18} />
               Continue as patient
             </button>
-          </div>
-          <div className="hardware-note">
-            <CircleDot size={14} />
-            Demo simulator keeps the full workflow available without glove or camera hardware.
           </div>
         </div>
 
@@ -2311,15 +2383,19 @@ function AppShell({
 }
 
 export default function App() {
-  const [entryScreen, setEntryScreen] = useState<EntryScreen>("landing");
-  const [authRole, setAuthRole] = useState<AuthRole>("doctor");
-  const [loggedIn, setLoggedIn] = useState(false);
+  const initialRoute = parseAppRoute(window.location.pathname);
+  const [entryScreen, setEntryScreen] = useState<EntryScreen>(initialRoute.kind === "landing" ? "landing" : "login");
+  const [authRole, setAuthRole] = useState<AuthRole>(
+    initialRoute.kind === "sign-in" ? initialRoute.role : initialRoute.kind === "patient" ? "patient" : "doctor"
+  );
+  const [loggedIn, setLoggedIn] = useState(initialRoute.kind === "doctor" || initialRoute.kind === "patient");
   const [patients, setPatients] = useState(seedPatients);
   const [assignments, setAssignments] = useState<Assignment[]>(demoAssignments);
   const [appointments, setAppointments] = useState<Appointment[]>(demoAppointments);
   const [alerts, setAlerts] = useState<Alert[]>(demoAlerts);
   const [aiSummaries, setAiSummaries] = useState<Record<string, AiProgressSummary>>({});
   const [difficultyRecommendations, setDifficultyRecommendations] = useState<Record<string, DifficultyRecommendation>>({});
+  const [exerciseAssignments, setExerciseAssignments] = useState<ExerciseAssignment[]>([]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -2346,9 +2422,16 @@ export default function App() {
   }, []);
 
 
-  const [selectedPatientId, setSelectedPatientId] = useState(seedPatients[0].id);
-  const [view, setView] = useState<ViewName>("dashboard");
-  const [patientTab, setPatientTab] = useState<PatientTab>("overview");
+  const [selectedPatientId, setSelectedPatientId] = useState(
+    initialRoute.kind === "doctor" && initialRoute.patientId ? initialRoute.patientId : seedPatients[0].id
+  );
+  const [view, setView] = useState<ViewName>(initialRoute.kind === "doctor" ? initialRoute.view : "dashboard");
+  const [patientTab, setPatientTab] = useState<PatientTab>(
+    initialRoute.kind === "doctor" && initialRoute.patientTab ? initialRoute.patientTab : "overview"
+  );
+  const [patientScreen, setPatientScreen] = useState<PatientScreen>(
+    initialRoute.kind === "patient" ? initialRoute.screen : "home"
+  );
   const [currentEvent, setCurrentEvent] = useState<GestureEvent>(() =>
     createGestureEvent(seedPatients[0].id, "open")
   );
@@ -2358,6 +2441,47 @@ export default function App() {
   const activeSessionRef = useRef<SessionDraft | null>(null);
   const previousGestureRef = useRef<GestureName>("open");
   const seenEventIdsRef = useRef<Set<string>>(new Set());
+
+  const navigateTo = useCallback((path: string, replace = false) => {
+    const nextPath = normalizePathname(path);
+    if (normalizePathname(window.location.pathname) === nextPath) return;
+    if (replace) {
+      window.history.replaceState(null, "", nextPath);
+    } else {
+      window.history.pushState(null, "", nextPath);
+    }
+  }, []);
+
+  const applyRoute = useCallback((route: AppRoute) => {
+    if (route.kind === "landing") {
+      setLoggedIn(false);
+      setEntryScreen("landing");
+      return;
+    }
+    if (route.kind === "sign-in") {
+      setLoggedIn(false);
+      setAuthRole(route.role);
+      setEntryScreen("login");
+      return;
+    }
+    setLoggedIn(true);
+    setEntryScreen("login");
+    if (route.kind === "patient") {
+      setAuthRole("patient");
+      setPatientScreen(route.screen);
+      return;
+    }
+    setAuthRole("doctor");
+    setView(route.view);
+    if (route.patientId) setSelectedPatientId(route.patientId);
+    if (route.patientTab) setPatientTab(route.patientTab);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => applyRoute(parseAppRoute(window.location.pathname));
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [applyRoute]);
 
   const selectedPatient = useMemo(
     () => patients.find((patient) => patient.id === selectedPatientId) ?? patients[0],
@@ -2377,7 +2501,28 @@ export default function App() {
     [appointments, selectedPatient.id]
   );
 
+  const clinicianAssignedExercises = useMemo(
+    () => exerciseAssignments.filter((assignment) => assignment.patientId === selectedPatient.id),
+    [exerciseAssignments, selectedPatient.id]
+  );
+
   const doctorGameLibraryPatient = useMemo(() => createDoctorGameLibraryPatient(demoDoctor.name), []);
+
+  const openDoctorView = useCallback(
+    (nextView: ViewName) => {
+      setView(nextView);
+      navigateTo(pathForDoctorView(nextView, selectedPatientId, patientTab));
+    },
+    [navigateTo, patientTab, selectedPatientId]
+  );
+
+  const openPatientPortalScreen = useCallback(
+    (screen: PatientScreen) => {
+      setPatientScreen(screen);
+      navigateTo(patientScreenPaths[screen]);
+    },
+    [navigateTo]
+  );
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -2503,6 +2648,7 @@ export default function App() {
     previousGestureRef.current = "open";
     setPatientTab("overview");
     setView("patient");
+    navigateTo(pathForDoctorView("patient", id, "overview"));
   };
 
   const refreshPatientSideData = async (patientId: string) => {
@@ -2647,6 +2793,7 @@ export default function App() {
     });
     setPatientTab("live");
     setView("patient");
+    navigateTo(pathForDoctorView("patient", selectedPatient.id, "live"));
   };
 
   const endSession = async () => {
@@ -2685,6 +2832,7 @@ export default function App() {
     setActiveSession(null);
     setPatientTab("sessions");
     setView("patient");
+    navigateTo(pathForDoctorView("patient", selectedPatient.id, "sessions"));
   };
 
   const page = (() => {
@@ -2708,6 +2856,28 @@ export default function App() {
 	    if (view === "glove-dev") {
       return <GloveDevPage patientId="demo-patient-1" />;
     }
+    if (view === "exercises") {
+      return (
+        <ExercisesPage
+          patients={patients}
+          assignments={exerciseAssignments}
+          onAssign={(patientId, exerciseId) =>
+            setExerciseAssignments((items) => [
+              {
+                id: `exercise-assignment-${Date.now()}`,
+                patientId,
+                exerciseId,
+                assignedAt: new Date().toISOString()
+              },
+              ...items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId)
+            ])
+          }
+          onUnassign={(assignmentId) =>
+            setExerciseAssignments((items) => items.filter((assignment) => assignment.id !== assignmentId))
+          }
+        />
+      );
+    }
     if (view === "rehab-games" || view === "rehab-calendar" || view === "rehab-assistant") {
 	      return (
 	        <PatientExperience
@@ -2717,6 +2887,10 @@ export default function App() {
 	          currentEvent={currentEvent}
 	          backendConnected={backendConnected}
 	          onSessionSaved={savePatientSession}
+          onNavigateScreen={(screen) => {
+            const nextView = screen === "calendar" ? "rehab-calendar" : screen === "assistant" ? "rehab-assistant" : "rehab-games";
+            openDoctorView(nextView);
+          }}
 	        />
 	      );
 	    }
@@ -2770,8 +2944,11 @@ export default function App() {
 	          patient={selectedPatient}
 	          assignments={assignments}
 	          activeTab={patientTab}
-          onTabChange={setPatientTab}
-          onBack={() => setView("dashboard")}
+          onTabChange={(tab) => {
+            setPatientTab(tab);
+            navigateTo(pathForDoctorView("patient", selectedPatient.id, tab));
+          }}
+          onBack={() => openDoctorView("dashboard")}
         >
           {patientContent}
         </PatientWorkspaceShell>
@@ -2786,6 +2963,7 @@ export default function App() {
         onSelectRole={(role) => {
           setAuthRole(role);
           setEntryScreen("login");
+          navigateTo(`/${role}/sign-in`);
         }}
       />
     );
@@ -2798,10 +2976,18 @@ export default function App() {
         onLogin={(email) => {
           if (authRole === "patient") {
             setSelectedPatientId(patientIdForPortalEmail(email, patients));
+            setPatientScreen("home");
+            navigateTo(patientScreenPaths.home);
+          } else {
+            setView("dashboard");
+            navigateTo(doctorViewPaths.dashboard ?? "/doctor/dashboard");
           }
           setLoggedIn(true);
         }}
-        onBack={() => setEntryScreen("landing")}
+        onBack={() => {
+          setEntryScreen("landing");
+          navigateTo("/");
+        }}
       />
     );
   }
@@ -2810,18 +2996,21 @@ export default function App() {
     await supabase?.auth.signOut();
     setLoggedIn(false);
     setEntryScreen("landing");
+    navigateTo("/");
   };
 
   if (authRole === "patient") {
     return (
       <PatientExperience
         patient={selectedPatient}
-        screen="home"
+        screen={patientScreen}
         currentEvent={currentEvent}
         backendConnected={backendConnected}
         onSessionSaved={savePatientSession}
         assignedGames={clinicianAssignedGames}
+        assignedExercises={clinicianAssignedExercises}
         clinicAppointments={clinicianAppointmentSchedule}
+        onNavigateScreen={openPatientPortalScreen}
         onLogout={handleLogout}
       />
     );
@@ -2830,7 +3019,7 @@ export default function App() {
   return (
     <AppShell
       view={view}
-      setView={setView}
+      setView={openDoctorView}
       patient={selectedPatient}
       currentEvent={currentEvent}
       backendConnected={backendConnected}

@@ -109,8 +109,7 @@ export function PatientInputProvider({
   calibration,
   openFistOnly = false,
   gloveMode,
-  sessionId,
-  slowMode = false
+  sessionId
 }: {
   children: ReactNode;
   patientId: string;
@@ -119,7 +118,6 @@ export function PatientInputProvider({
   openFistOnly?: boolean;
   gloveMode?: PatientGloveMode;
   sessionId?: string;
-  slowMode?: boolean;
 }) {
   const effectiveGloveMode: PatientGloveMode = gloveMode ?? (openFistOnly ? "ball-pickup" : "default");
   const [inputMode, setInputModeState] = useState<InputMode>(() => loadInputMode());
@@ -259,11 +257,11 @@ export function PatientInputProvider({
         demoIndexRef.current += 1;
         emitGesture(item.gesture, gestureTargets[item.gesture]);
       },
-      slowMode ? 1400 : 900
+      900
     );
 
     return () => window.clearInterval(interval);
-  }, [effectiveGloveMode, emitGesture, slowMode]);
+  }, [effectiveGloveMode, emitGesture]);
 
   useEffect(() => {
     if (effectiveGloveMode === "default") return undefined;

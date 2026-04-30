@@ -7270,76 +7270,6 @@ th {
   background: var(--patient-primary);
 }
 
-.patient-a11y {
-  color: #0f172a;
-}
-
-.patient-a11y .primary-button,
-.patient-a11y .secondary-button,
-.patient-a11y .toggle-button,
-.patient-a11y .manual-gesture-controls button {
-  min-height: 52px;
-  font-size: 1rem;
-}
-
-.patient-a11y .game-board {
-  min-height: 540px;
-  border-width: 2px;
-  background-color: #fff;
-}
-
-.patient-a11y .finger-tap-piano-root .piano-board {
-  min-height: 320px;
-}
-
-.patient-a11y .finger-tap-piano-root .piano-key {
-  min-height: 104px;
-}
-
-.patient-a11y .ball-3d-board {
-  min-height: 600px;
-  border-width: 2px;
-}
-
-.patient-a11y .carrom-3d-board {
-  min-height: 680px;
-  border-width: 2px;
-}
-
-.patient-a11y .carrom-3d-board canvas {
-  height: 680px !important;
-}
-
-.patient-a11y .carrom-3d-board:fullscreen canvas {
-  height: 100vh !important;
-}
-
-.patient-a11y .carrom-hud,
-.patient-a11y .carrom-status-bar {
-  font-size: 1rem;
-}
-
-.patient-a11y .carrom-stat-row span,
-.patient-a11y .carrom-status-bar span {
-  font-size: 0.95rem;
-}
-
-.patient-a11y .ball-target {
-  width: 72px;
-  height: 72px;
-}
-
-.patient-a11y .basket-target,
-.patient-a11y .carrom-target,
-.patient-a11y .carrom-striker {
-  width: 120px;
-  height: 96px;
-}
-
-.patient-a11y .bubble-target {
-  border-width: 4px;
-}
-
 @media (max-width: 1120px) {
   .patient-grid,
   .metric-grid {
@@ -8658,5 +8588,231 @@ th {
 @media (max-width: 520px) {
   .workspace .doctor-metric-grid.metric-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Exercises */
+.exercises-controls {
+  padding: 1rem 1.25rem;
+}
+
+.exercises-control-row {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.exercises-control-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 200px;
+}
+
+.exercises-control-row select {
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: #fff;
+  color: inherit;
+  font-size: 0.9rem;
+}
+
+.exercise-grid,
+.exercise-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.exercise-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.exercise-desc {
+  margin: 0;
+  color: var(--muted-text);
+  font-size: 0.9rem;
+}
+
+.exercise-meta {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.exercise-meta-item {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.exercise-card .primary-button,
+.exercise-card .secondary-button {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.exercise-assigned-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.status-pill.difficulty-easy {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.status-pill.difficulty-medium {
+  background: rgba(217, 119, 6, 0.14);
+  color: #b45309;
+}
+
+.status-pill.difficulty-hard {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
+.patient-exercise-preview {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: end;
+  min-height: 220px;
+  padding: 1.5rem;
+}
+
+.patient-exercise-preview span {
+  display: grid;
+  place-items: center;
+  min-height: 92px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--muted-text);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.patient-exercise-preview span.is-target {
+  min-height: 160px;
+  border-color: rgba(20, 184, 166, 0.45);
+  background: rgba(20, 184, 166, 0.16);
+  color: #0f766e;
+}
+
+.patient-exercise-session {
+  display: grid;
+  gap: 1.2rem;
+}
+
+.exercise-progress-track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.exercise-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #14b8a6, #2563eb);
+  transition: width 180ms ease;
+}
+
+.exercise-live-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(280px, 1.1fr);
+  gap: 1rem;
+}
+
+.exercise-live-target {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  padding: 1rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.exercise-live-target strong {
+  font-size: 1.15rem;
+}
+
+.exercise-live-target p {
+  margin: 0;
+  color: var(--muted-text);
+}
+
+.exercise-live-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.exercise-live-stat-row span {
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  font-size: 0.78rem;
+  color: var(--muted-text);
+}
+
+.exercise-finger-meter-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.exercise-finger-meter {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.exercise-finger-meter div {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.exercise-finger-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #94a3b8;
+}
+
+.exercise-finger-meter.is-target i {
+  background: #14b8a6;
+}
+
+.exercise-session-actions,
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+@media (max-width: 820px) {
+  .exercise-live-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-exercise-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
