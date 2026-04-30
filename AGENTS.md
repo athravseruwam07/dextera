@@ -67,6 +67,7 @@ npm run build        # tsc -b && vite build
 npm run test         # vitest run (single pass)
 npm run test:watch   # vitest watch
 npm run smoke        # node scripts/smoke.mjs
+npm run seed:doctor  # create/update Supabase doctor user; requires SUPABASE_SERVICE_ROLE_KEY
 ```
 
 Run a single test file:
@@ -107,6 +108,8 @@ gh issue list --repo MohsinCoding/gloving
 3. Built-in simulator (toggle in Live Session view) calls `POST /api/dev/fake-gesture` when backend is up, or generates events locally from `mockData.ts` when offline
 
 `src/App.tsx` also owns lightweight History API routing. Public entry points are `/`, `/doctor/sign-in`, and `/patient/sign-in`. Doctor workspace URLs live under `/doctor/...` (`/doctor/dashboard`, `/doctor/patients`, `/doctor/patients/:id/:tab`, `/doctor/appointments`, `/doctor/rehab-games`, `/doctor/exercises`, `/doctor/glove-dev`). Patient portal top-level pages live under `/patient/...` (`/patient/plan`, `/patient/calendar`, `/patient/progress`, `/patient/assistant`). There is no React Router dependency.
+
+Authentication assumes Supabase is configured. Patients can create accounts from `/patient/sign-in` with full name, email, and password; the Supabase user id becomes the patient id in the backend patient profile, so patient login loads only that patient record plus its assignments/appointments/alerts. Doctors cannot self-register in the UI; the single clinic doctor account is `doctor@dextera.app` / `DexteraDoctor2026!` and manages all patients. Provision or reset that account with `cd frontend && $env:SUPABASE_URL="..." ; $env:SUPABASE_SERVICE_ROLE_KEY="..." ; npm run seed:doctor` on PowerShell.
 
 Rep counting: a fist→open gesture transition increments `repsCompleted`.
 
@@ -165,4 +168,4 @@ Frontend reads `VITE_API_BASE_URL` (default `http://127.0.0.1:4000`) and `VITE_W
 
 Seeded by either `npm run seed` (Postgres) or loaded automatically by `mockRepository.js`:
 - Patient IDs: `demo-patient-1` (Maya Patel), `demo-patient-2` (Eli Ramos), `demo-patient-3` (Jordan Kim)
-- Login: `therapist@demo.local` / `demo-password` (frontend only, no real auth)
+- Doctor login for Supabase-backed mode: `doctor@dextera.app` / `DexteraDoctor2026!` (create this user in Supabase Auth before production use)

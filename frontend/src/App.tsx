@@ -39,11 +39,13 @@ import {
   connectGestureStream,
   createAppointment,
   createAssignment,
+  createBackendPatientProfile,
   deleteAssignment,
   endBackendSession,
   fetchAlerts,
   fetchAppointments,
   fetchAssignments,
+  fetchBackendPatient,
   fetchBackendPatients,
   fetchDifficultyRecommendation,
   generateAiSummary,
@@ -89,7 +91,7 @@ import type {
   SessionDraft,
   ViewName
 } from "./types";
-import { PatientExperience, type PatientScreen } from "./patient/PatientExperience";
+import { PatientExperience, type PatientExerciseRouteStep, type PatientScreen } from "./patient/PatientExperience";
 import { useGloveData } from "./lib/useGloveData";
 import { Canvas } from "@react-three/fiber";
 import { HandModel3D } from "./vr/components/HandModel3D";
@@ -107,11 +109,16 @@ import type { ExerciseAssignment } from "./data/exercises";
 type AuthRole = "doctor" | "patient";
 type EntryScreen = "landing" | "login";
 
+const productionDoctorAccount = {
+  email: "doctor@dextera.app",
+  password: "DexteraDoctor2026!"
+};
+
 type AppRoute =
   | { kind: "landing" }
   | { kind: "sign-in"; role: AuthRole }
   | { kind: "doctor"; view: ViewName; patientId?: string; patientTab?: PatientTab }
-  | { kind: "patient"; screen: PatientScreen };
+  | { kind: "patient"; screen: PatientScreen; exerciseAssignmentId?: string; exerciseStep?: PatientExerciseRouteStep };
 
 const rehabGameViews: ViewName[] = ["rehab-games", "rehab-calendar", "rehab-assistant"];
 
@@ -133,6 +140,10 @@ const patientScreenPaths: Record<PatientScreen, string> = {
   assistant: "/patient/assistant"
 };
 
+function pathForPatientExercise(assignmentId: string, step: PatientExerciseRouteStep) {
+  return `/patient/exercises/${encodeURIComponent(assignmentId)}/${step}`;
+}
+
 function normalizePathname(pathname: string) {
   const clean = pathname.replace(/\/+$/, "");
   return clean || "/";
@@ -151,6 +162,15 @@ function parseAppRoute(pathname: string): AppRoute {
   if (path === "/patient/sign-in") return { kind: "sign-in", role: "patient" };
 
   if (segments[0] === "patient") {
+    if (segments[1] === "exercises" && segments[2]) {
+      const step = segments[3] === "play" || segments[3] === "results" ? segments[3] : "detail";
+      return {
+        kind: "patient",
+        screen: "home",
+        exerciseAssignmentId: decodeURIComponent(segments[2]),
+        exerciseStep: step
+      };
+    }
     const screen = segments[1] as PatientScreen | undefined;
     if (screen === "calendar" || screen === "progress" || screen === "assistant") return { kind: "patient", screen };
     return { kind: "patient", screen: "home" };
@@ -503,16 +523,15 @@ function LandingPage({ onSelectRole }: { onSelectRole: (role: AuthRole) => void 
 
 function LoginPage({
   role,
-  onLogin,
-  onBack
+  onLogin
 }: {
   role: AuthRole;
-  onLogin: (email: string) => void;
-  onBack: () => void;
+  onLogin: (email: string, fullName?: string) => Promise<void> | void;
 }) {
-  const [email, setEmail] = useState(role === "doctor" ? "doctor@dextera.demo" : "maya@dextera.demo");
-  const [password, setPassword] = useState("demo");
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState(role === "doctor" ? productionDoctorAccount.email : "");
+  const [password, setPassword] = useState(role === "doctor" ? productionDoctorAccount.password : "");
+  const [isSignUp, setIsSignUp] = useState(role === "patient");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -522,20 +541,35 @@ function LoginPage({
     setError("");
     setMessage("");
 
+    if (role === "doctor" && email.trim().toLowerCase() !== productionDoctorAccount.email) {
+      setError("Use the clinic doctor account.");
+      return;
+    }
+    if (isSignUp && !fullName.trim()) {
+      setError("Enter your full name.");
+      return;
+    }
+
     if (!supabase) {
-      onLogin(email);
+      await onLogin(email, fullName);
       return;
     }
 
     setLoading(true);
 
     if (isSignUp) {
-      const { error: authError } = await supabase.auth.signUp({ email, password });
+      const { data, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName.trim(), role: "patient" } }
+      });
       setLoading(false);
       if (authError) {
         setError(authError.message);
+      } else if (data.session) {
+        await onLogin(email, fullName);
       } else {
-        setMessage("Account created — check your email to confirm, or sign in if confirmation is disabled.");
+        setMessage("Account created. Check your email to confirm, then sign in.");
         setIsSignUp(false);
       }
     } else {
@@ -544,7 +578,7 @@ function LoginPage({
       if (authError) {
         setError(authError.message);
       } else {
-        onLogin(email);
+        await onLogin(email, fullName);
       }
     }
   };
@@ -557,13 +591,25 @@ function LoginPage({
         </div>
         <div>
           <span className="eyebrow">Dextera</span>
-          <h1>{role === "doctor" ? "Doctor sign in" : "Patient sign in"}</h1>
+          <h1>{role === "doctor" ? "Doctor sign in" : isSignUp ? "Create patient account" : "Patient sign in"}</h1>
           <p>
             {role === "doctor"
               ? "Access your rehab workspace."
-              : "View today's exercises and start your session."}
+              : "Use your own account to view your care plan and sessions."}
           </p>
         </div>
+        {isSignUp ? (
+          <label>
+            Full name
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Maya Patel"
+              required
+            />
+          </label>
+        ) : null}
         <label>
           Email
           <input
@@ -590,16 +636,15 @@ function LoginPage({
           <Send size={18} />
           {loading ? (isSignUp ? "Creating account…" : "Signing in…") : (isSignUp ? "Create account" : role === "doctor" ? "Enter doctor dashboard" : "Enter patient portal")}
         </button>
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={() => { setIsSignUp((v) => !v); setError(""); setMessage(""); }}
-        >
-          {isSignUp ? "Already have an account? Sign in" : "No account? Create one"}
-        </button>
-        <button type="button" className="secondary-button" onClick={onBack}>
-          Back to role selection
-        </button>
+        {role === "patient" ? (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() => { setIsSignUp((value) => !value); setError(""); setMessage(""); }}
+          >
+            {isSignUp ? "Already have an account? Sign in" : "Create patient account"}
+          </button>
+        ) : null}
       </form>
     </main>
   );
@@ -703,15 +748,6 @@ function patientAlerts(patientId: string, alerts: Alert[]) {
 
 function patientAssignments(patientId: string, assignments: Assignment[]) {
   return assignments.filter((assignment) => assignment.patientId === patientId);
-}
-
-function patientIdForPortalEmail(email: string, roster: Patient[]): string {
-  const e = email.trim().toLowerCase();
-  if (e.includes("maya") || e.includes("patient-1")) return "patient-1";
-  if (e.includes("daniel") || e.includes("eli") || e.includes("patient-2")) return "patient-2";
-  if (e.includes("amira") || e.includes("jordan") || e.includes("patient-3")) return "patient-3";
-  const match = roster.find((p) => p.userId && e.includes(p.userId.replace("user-", "")));
-  return match?.id ?? roster[0]?.id ?? "patient-1";
 }
 
 function exerciseFromAssignment(assignment: Assignment): ExerciseTemplate {
@@ -2307,7 +2343,6 @@ function AppShell({
 	            <p>{topbarSubtitle}</p>
 	          </div>
 	          <div className="topbar-actions">
-	            <div className="system-pill">Demo simulator active</div>
 	            {view === "patient" || rehabGameViews.includes(view) ? <GestureBadge gesture={currentEvent.gesture} /> : null}
             <div className="settings-menu" ref={settingsMenuRef}>
               <button
@@ -2322,14 +2357,6 @@ function AppShell({
               </button>
               {settingsMenuOpen ? (
                 <div className="settings-dropdown" role="menu" aria-label="Settings menu">
-                  <button type="button" role="menuitem" onClick={() => openSettingsDialog("accounts")}>
-                    <UserRound size={17} />
-                    Accounts
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => openSettingsDialog("system-status")}>
-                    <Activity size={17} />
-                    System status
-                  </button>
                   <button type="button" role="menuitem" className="settings-dropdown-danger" onClick={onLogout}>
                     <LogOut size={17} />
                     Sign out
@@ -2356,8 +2383,8 @@ function AppShell({
             </div>
             {settingsDialog === "accounts" ? (
               <div className="stack-list">
-                <div className="list-card"><strong>Doctor</strong><p>doctor@dextera.demo · password demo</p></div>
-                <div className="list-card"><strong>Patient</strong><p>maya@dextera.demo · password demo</p></div>
+                <div className="list-card"><strong>Doctor</strong><p>{productionDoctorAccount.email} · {productionDoctorAccount.password}</p></div>
+                <div className="list-card"><strong>Patients</strong><p>Patients create their own accounts from the patient sign-in page.</p></div>
               </div>
             ) : (
               <div className="stack-list">
@@ -2389,10 +2416,33 @@ export default function App() {
     initialRoute.kind === "sign-in" ? initialRoute.role : initialRoute.kind === "patient" ? "patient" : "doctor"
   );
   const [loggedIn, setLoggedIn] = useState(initialRoute.kind === "doctor" || initialRoute.kind === "patient");
-  const [patients, setPatients] = useState(seedPatients);
-  const [assignments, setAssignments] = useState<Assignment[]>(demoAssignments);
-  const [appointments, setAppointments] = useState<Appointment[]>(demoAppointments);
-  const [alerts, setAlerts] = useState<Alert[]>(demoAlerts);
+  const productionAuth = Boolean(supabase);
+  const [patients, setPatients] = useState<Patient[]>(
+    initialRoute.kind === "patient"
+      ? [{
+          id: "patient-loading",
+          userId: "patient-loading",
+          doctorId: "doctor-1",
+          name: "Patient",
+          age: 0,
+          diagnosis: "Hand rehabilitation program",
+          condition: "Hand rehabilitation program",
+          therapist: demoDoctor.name,
+          status: "active",
+          goal: "Complete assigned hand therapy sessions",
+          recoveryGoal: "Complete assigned hand therapy sessions",
+          affectedHand: "right",
+          notes: "",
+          baselineMobility: 40,
+          sessions: []
+        }]
+      : productionAuth
+        ? []
+        : seedPatients
+  );
+  const [assignments, setAssignments] = useState<Assignment[]>(productionAuth ? [] : demoAssignments);
+  const [appointments, setAppointments] = useState<Appointment[]>(productionAuth ? [] : demoAppointments);
+  const [alerts, setAlerts] = useState<Alert[]>(productionAuth ? [] : demoAlerts);
   const [aiSummaries, setAiSummaries] = useState<Record<string, AiProgressSummary>>({});
   const [difficultyRecommendations, setDifficultyRecommendations] = useState<Record<string, DifficultyRecommendation>>({});
   const [exerciseAssignments, setExerciseAssignments] = useState<ExerciseAssignment[]>([]);
@@ -2423,7 +2473,7 @@ export default function App() {
 
 
   const [selectedPatientId, setSelectedPatientId] = useState(
-    initialRoute.kind === "doctor" && initialRoute.patientId ? initialRoute.patientId : seedPatients[0].id
+    initialRoute.kind === "doctor" && initialRoute.patientId ? initialRoute.patientId : productionAuth ? "" : seedPatients[0].id
   );
   const [view, setView] = useState<ViewName>(initialRoute.kind === "doctor" ? initialRoute.view : "dashboard");
   const [patientTab, setPatientTab] = useState<PatientTab>(
@@ -2432,8 +2482,16 @@ export default function App() {
   const [patientScreen, setPatientScreen] = useState<PatientScreen>(
     initialRoute.kind === "patient" ? initialRoute.screen : "home"
   );
+  const [patientExerciseRoute, setPatientExerciseRoute] = useState<{
+    assignmentId: string;
+    step: PatientExerciseRouteStep;
+  } | null>(
+    initialRoute.kind === "patient" && initialRoute.exerciseAssignmentId
+      ? { assignmentId: initialRoute.exerciseAssignmentId, step: initialRoute.exerciseStep ?? "detail" }
+      : null
+  );
   const [currentEvent, setCurrentEvent] = useState<GestureEvent>(() =>
-    createGestureEvent(seedPatients[0].id, "open")
+    createGestureEvent(productionAuth ? "patient-loading" : seedPatients[0].id, "open")
   );
   const [simulatorEnabled, setSimulatorEnabled] = useState(true);
   const [backendConnected, setBackendConnected] = useState(false);
@@ -2469,6 +2527,9 @@ export default function App() {
     if (route.kind === "patient") {
       setAuthRole("patient");
       setPatientScreen(route.screen);
+      setPatientExerciseRoute(
+        route.exerciseAssignmentId ? { assignmentId: route.exerciseAssignmentId, step: route.exerciseStep ?? "detail" } : null
+      );
       return;
     }
     setAuthRole("doctor");
@@ -2489,21 +2550,24 @@ export default function App() {
   );
 
   const clinicianAssignedGames = useMemo(
-    () => doctorAssignmentsToPatientCare(patientAssignments(selectedPatient.id, assignments)),
-    [assignments, selectedPatient.id]
+    () => selectedPatient ? doctorAssignmentsToPatientCare(patientAssignments(selectedPatient.id, assignments)) : [],
+    [assignments, selectedPatient]
   );
 
   const clinicianAppointmentSchedule = useMemo(
     () =>
+      selectedPatient
+        ?
       appointments
         .filter((item) => item.patientId === selectedPatient.id)
-        .map(doctorAppointmentToPatientCare),
-    [appointments, selectedPatient.id]
+        .map(doctorAppointmentToPatientCare)
+        : [],
+    [appointments, selectedPatient]
   );
 
   const clinicianAssignedExercises = useMemo(
-    () => exerciseAssignments.filter((assignment) => assignment.patientId === selectedPatient.id),
-    [exerciseAssignments, selectedPatient.id]
+    () => selectedPatient ? exerciseAssignments.filter((assignment) => assignment.patientId === selectedPatient.id) : [],
+    [exerciseAssignments, selectedPatient]
   );
 
   const doctorGameLibraryPatient = useMemo(() => createDoctorGameLibraryPatient(demoDoctor.name), []);
@@ -2519,7 +2583,17 @@ export default function App() {
   const openPatientPortalScreen = useCallback(
     (screen: PatientScreen) => {
       setPatientScreen(screen);
+      setPatientExerciseRoute(null);
       navigateTo(patientScreenPaths[screen]);
+    },
+    [navigateTo]
+  );
+
+  const openPatientExerciseRoute = useCallback(
+    (assignmentId: string, step: PatientExerciseRouteStep) => {
+      setPatientScreen("home");
+      setPatientExerciseRoute({ assignmentId, step });
+      navigateTo(pathForPatientExercise(assignmentId, step));
     },
     [navigateTo]
   );
@@ -2552,19 +2626,28 @@ export default function App() {
     let cancelled = false;
 
     async function loadBackendData() {
+      if (authRole === "patient") return;
+      if (productionAuth && (!loggedIn || authRole !== "doctor")) return;
       try {
         await checkBackendHealth();
+        if (productionAuth && supabase) {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) {
+            if (!cancelled) setBackendConnected(false);
+            return;
+          }
+        }
         const backendPatients = await fetchBackendPatients();
         if (cancelled) return;
 
         setPatients(backendPatients);
         setSelectedPatientId((current) =>
-          backendPatients.some((patient) => patient.id === current) ? current : backendPatients[0]?.id ?? seedPatients[0].id
+          backendPatients.some((patient) => patient.id === current) ? current : backendPatients[0]?.id ?? ""
         );
         setBackendConnected(true);
         const [backendAlerts, backendAppointments] = await Promise.all([
-          fetchAlerts().catch(() => demoAlerts),
-          fetchAppointments().catch(() => demoAppointments)
+          fetchAlerts().catch(() => productionAuth ? [] : demoAlerts),
+          fetchAppointments().catch(() => productionAuth ? [] : demoAppointments)
         ]);
         if (!cancelled) {
           setAlerts(backendAlerts);
@@ -2588,7 +2671,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authRole, loggedIn, productionAuth]);
 
   useEffect(() => {
     if (!backendConnected) return;
@@ -2718,7 +2801,8 @@ export default function App() {
     ]);
   };
 
-  const handleRegenerateSummary = async (patientId = selectedPatient.id) => {
+  const handleRegenerateSummary = async (patientId = selectedPatient?.id ?? "") => {
+    if (!patientId) return;
     if (backendConnected) {
       try {
         const summary = await generateAiSummary(patientId);
@@ -2729,6 +2813,7 @@ export default function App() {
       }
     }
     const patient = patients.find((item) => item.id === patientId) || selectedPatient;
+    if (!patient) return;
     const weakest = detectWeakestFinger(patient.sessions);
     const recommendation = getLocalDifficultyRecommendation(patient, assignments, patient.sessions);
     setAiSummaries((items) => ({
@@ -2768,6 +2853,7 @@ export default function App() {
   }, []);
 
   const startSession = async (exercise: ExerciseTemplate, assignment?: Assignment) => {
+    if (!selectedPatient) return;
     let sessionId = `live-${Date.now()}`;
     let startedAt = new Date().toISOString();
 
@@ -2797,7 +2883,7 @@ export default function App() {
   };
 
   const endSession = async () => {
-    if (!activeSession) return;
+    if (!activeSession || !selectedPatient) return;
     const completed = sessionFromDraft(activeSession);
     const averageHoldMs = completed.events.length
       ? Math.round(completed.events.reduce((sum, event) => sum + event.holdMs, 0) / completed.events.length)
@@ -2834,6 +2920,69 @@ export default function App() {
     setView("patient");
     navigateTo(pathForDoctorView("patient", selectedPatient.id, "sessions"));
   };
+
+  const loadPatientAccount = async (email: string, fullName?: string) => {
+    const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+    const userId = data.user?.id ?? `patient-${email.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const displayName =
+      fullName?.trim() ||
+      String(data.user?.user_metadata?.full_name || "").trim() ||
+      email.split("@")[0] ||
+      "Patient";
+    let patient: Patient = {
+      id: userId,
+      userId,
+      doctorId: "doctor-1",
+      name: displayName,
+      age: 0,
+      diagnosis: "Hand rehabilitation program",
+      condition: "Hand rehabilitation program",
+      therapist: demoDoctor.name,
+      status: "active",
+      goal: "Complete assigned hand therapy sessions",
+      recoveryGoal: "Complete assigned hand therapy sessions",
+      affectedHand: "right",
+      notes: "",
+      baselineMobility: 40,
+      sessions: []
+    };
+
+    if (backendConnected || supabase) {
+      try {
+        patient = await fetchBackendPatient(userId);
+      } catch {
+        try {
+          patient = await createBackendPatientProfile({ id: userId, fullName: displayName });
+        } catch {
+          // Keep the local patient shell if backend profile creation is unavailable.
+        }
+      }
+    }
+
+    setPatients([patient]);
+    setSelectedPatientId(patient.id);
+    setCurrentEvent(createGestureEvent(patient.id, "open"));
+    const [nextAssignments, nextAppointments, nextAlerts] = await Promise.all([
+      fetchAssignments(patient.id).catch(() => []),
+      fetchAppointments(patient.id).catch(() => []),
+      fetchAlerts(patient.id).catch(() => [])
+    ]);
+    setAssignments(nextAssignments);
+    setAppointments(nextAppointments);
+    setAlerts(nextAlerts);
+  };
+
+  useEffect(() => {
+    if (!loggedIn || authRole !== "patient" || !supabase) return;
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancelled || !data.user?.email) return;
+      void loadPatientAccount(data.user.email, String(data.user.user_metadata?.full_name || ""));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authRole, loggedIn]);
 
   const page = (() => {
     if (view === "dashboard") {
@@ -2895,6 +3044,16 @@ export default function App() {
 	      );
 	    }
 	    if (view === "patient") {
+      if (!selectedPatient) {
+        return (
+          <PatientsRosterPage
+            patients={patients}
+            assignments={assignments}
+            alerts={alerts}
+            onSelectPatient={selectPatient}
+          />
+        );
+      }
       let patientContent: React.ReactNode;
       if (patientTab === "live") {
         patientContent = (
@@ -2973,20 +3132,18 @@ export default function App() {
     return (
       <LoginPage
         role={authRole}
-        onLogin={(email) => {
+        onLogin={async (email, fullName) => {
           if (authRole === "patient") {
-            setSelectedPatientId(patientIdForPortalEmail(email, patients));
+            await loadPatientAccount(email, fullName);
             setPatientScreen("home");
+            setPatientExerciseRoute(null);
             navigateTo(patientScreenPaths.home);
           } else {
+            await syncTherapistProfile();
             setView("dashboard");
             navigateTo(doctorViewPaths.dashboard ?? "/doctor/dashboard");
           }
           setLoggedIn(true);
-        }}
-        onBack={() => {
-          setEntryScreen("landing");
-          navigateTo("/");
         }}
       />
     );
@@ -3011,6 +3168,8 @@ export default function App() {
         assignedExercises={clinicianAssignedExercises}
         clinicAppointments={clinicianAppointmentSchedule}
         onNavigateScreen={openPatientPortalScreen}
+        exerciseRoute={patientExerciseRoute}
+        onNavigateExercise={openPatientExerciseRoute}
         onLogout={handleLogout}
       />
     );

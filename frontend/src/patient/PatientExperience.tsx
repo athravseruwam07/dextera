@@ -79,6 +79,7 @@ import {
 import { fingerExercises, type ExerciseAssignment, type FingerExercise } from "../data/exercises";
 
 export type PatientScreen = "home" | "calendar" | "progress" | "assistant";
+export type PatientExerciseRouteStep = "detail" | "play" | "results";
 
 type PatientRoute =
   | { step: "dashboard" }
@@ -359,6 +360,8 @@ export function PatientExperience({
   clinicAppointments,
   onLogout,
   onNavigateScreen,
+  exerciseRoute,
+  onNavigateExercise,
   experienceMode = "patient"
 }: {
   patient: Patient;
@@ -375,6 +378,8 @@ export function PatientExperience({
   experienceMode?: "patient" | "doctor-library";
   onLogout?: () => void;
   onNavigateScreen?: (screen: PatientScreen) => void;
+  exerciseRoute?: { assignmentId: string; step: PatientExerciseRouteStep } | null;
+  onNavigateExercise?: (assignmentId: string, step: PatientExerciseRouteStep) => void;
 }) {
   const [route, setRoute] = useState<PatientRoute>({ step: "dashboard" });
   const [results, setResults] = useState<SessionResult[]>(() => loadSessionResults(patient.id));
@@ -410,14 +415,34 @@ export function PatientExperience({
 
   useEffect(() => {
     setResults(loadSessionResults(patient.id));
+    if (exerciseRoute) {
+      setRoute({
+        step:
+          exerciseRoute.step === "play"
+            ? "exercise-play"
+            : exerciseRoute.step === "results"
+              ? "exercise-results"
+              : "exercise-detail",
+        exerciseAssignmentId: exerciseRoute.assignmentId
+      });
+      return;
+    }
     setRoute({
       step: screen === "calendar" ? "calendar" : screen === "assistant" ? "assistant" : screen === "progress" ? "progress" : "dashboard"
     });
-  }, [patient.id, screen]);
+  }, [exerciseRoute, patient.id, screen]);
 
   const goToPatientScreen = (nextScreen: PatientScreen) => {
     onNavigateScreen?.(nextScreen);
     setRoute({ step: nextScreen === "home" ? "dashboard" : nextScreen });
+  };
+
+  const goToExercise = (assignmentId: string, step: PatientExerciseRouteStep) => {
+    onNavigateExercise?.(assignmentId, step);
+    setRoute({
+      step: step === "play" ? "exercise-play" : step === "results" ? "exercise-results" : "exercise-detail",
+      exerciseAssignmentId: assignmentId
+    });
   };
 
   const selectedAssignment: PatientCareAssignment | undefined =
@@ -597,10 +622,10 @@ export function PatientExperience({
         return (
           <PatientExerciseDetail
             assignment={selectedExerciseAssignment}
-            onBack={() => setRoute({ step: "dashboard" })}
+            onBack={() => goToPatientScreen("home")}
             onStart={() => {
               setExerciseResult(undefined);
-              setRoute({ step: "exercise-play", exerciseAssignmentId: selectedExerciseAssignment.id });
+              goToExercise(selectedExerciseAssignment.id, "play");
             }}
           />
         );
@@ -610,10 +635,10 @@ export function PatientExperience({
         return (
           <PatientExerciseSession
             assignment={selectedExerciseAssignment}
-            onBack={() => setRoute({ step: "exercise-detail", exerciseAssignmentId: selectedExerciseAssignment.id })}
+            onBack={() => goToExercise(selectedExerciseAssignment.id, "detail")}
             onComplete={(result) => {
               setExerciseResult(result);
-              setRoute({ step: "exercise-results", exerciseAssignmentId: selectedExerciseAssignment.id });
+              goToExercise(selectedExerciseAssignment.id, "results");
             }}
           />
         );
@@ -625,9 +650,9 @@ export function PatientExperience({
           result={exerciseResult}
           onReplay={() => {
             setExerciseResult(undefined);
-            setRoute({ step: "exercise-play", exerciseAssignmentId: selectedExerciseAssignment.id });
+            goToExercise(selectedExerciseAssignment.id, "play");
           }}
-          onDashboard={() => setRoute({ step: "dashboard" })}
+          onDashboard={() => goToPatientScreen("home")}
         />
       );
     }
@@ -769,7 +794,7 @@ export function PatientExperience({
           results={results}
           experienceMode={experienceMode}
           onOpenAssignment={(assignmentId) => beginAssignment(assignmentId)}
-          onOpenExercise={(exerciseAssignmentId) => setRoute({ step: "exercise-detail", exerciseAssignmentId })}
+          onOpenExercise={(exerciseAssignmentId) => goToExercise(exerciseAssignmentId, "detail")}
         />
     );
   })();
@@ -1151,6 +1176,11 @@ function PatientExerciseDetail({
   onStart: () => void;
 }) {
   const exercise = assignment.exercise;
+  const setupSteps = [
+    { label: "Review", Icon: ClipboardList },
+    { label: "Practice", Icon: Hand },
+    { label: "Results", Icon: CheckCircle2 }
+  ];
   return (
     <section className="page-stack patient-exercise-detail">
       <BackButton onBack={onBack} label="Plan" />
@@ -1187,6 +1217,20 @@ function PatientExerciseDetail({
           </aside>
         </div>
       </header>
+
+      <section className="pregame-readiness-strip" aria-label="Exercise setup path">
+        <div className="pregame-readiness-steps">
+          {setupSteps.map(({ label, Icon }, index) => (
+            <div className="pregame-readiness-step" key={label}>
+              <span className="pregame-readiness-step-icon" aria-hidden>
+                <Icon size={17} strokeWidth={2.25} />
+              </span>
+              <strong>{label}</strong>
+              {index < setupSteps.length - 1 ? <span className="pregame-step-connector" aria-hidden /> : null}
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="pregame-lower">
         <div className="pregame-quick-section">
