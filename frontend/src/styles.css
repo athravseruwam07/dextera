@@ -1385,6 +1385,136 @@ th {
   border-color: var(--patient-line);
 }
 
+.doctor-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.doctor-metric-grid .metric-card {
+  min-height: 116px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "icon detail";
+  align-items: center;
+  gap: 0.2rem 0.85rem;
+  padding: 1rem 1.05rem;
+}
+
+.doctor-metric-grid .metric-icon {
+  grid-area: icon;
+  width: 44px;
+  height: 44px;
+}
+
+.doctor-metric-grid .metric-card span {
+  grid-area: label;
+  font-size: 0.92rem;
+}
+
+.doctor-metric-grid .metric-card strong {
+  grid-area: value;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.doctor-metric-grid .metric-card small {
+  grid-area: detail;
+  font-size: 0.86rem;
+}
+
+.dashboard-review-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.dashboard-list-panel {
+  min-height: 430px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-preview-list {
+  flex: 1;
+  align-content: start;
+  margin-top: 0.9rem;
+}
+
+.dashboard-preview-card {
+  min-height: 142px;
+  align-content: start;
+}
+
+.dashboard-preview-card .link-button {
+  justify-self: start;
+}
+
+.dashboard-more-link {
+  width: 100%;
+  min-height: 40px;
+  margin-top: auto;
+  border: 1px solid #bde8e1;
+  border-radius: var(--radius);
+  color: #0f766e;
+  background: #ecfdf5;
+  font-weight: 850;
+}
+
+.dashboard-more-link:hover {
+  border-color: #8dd8ca;
+  background: #d7f4ed;
+}
+
+.dashboard-modal,
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+}
+
+.dashboard-modal-backdrop,
+.settings-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: rgba(15, 23, 42, 0.54);
+}
+
+.dashboard-modal-panel,
+.settings-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(720px, calc(100vw - 2rem));
+  max-height: min(760px, calc(100vh - 2rem));
+  display: grid;
+  gap: 1rem;
+  overflow: hidden;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+}
+
+.settings-modal-panel {
+  width: min(560px, calc(100vw - 2rem));
+}
+
+.dashboard-modal-scroll {
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  display: grid;
+  gap: 0.75rem;
+  padding-right: 0.35rem;
+}
+
 .patient-utility-bar {
   position: sticky;
   top: 72px;
@@ -8011,4 +8141,33 @@ html[data-theme="dark"] .dashboard-modal-backdrop,
 html[data-theme="dark"] .settings-modal-backdrop,
 html[data-theme="dark"] .game-completion-backdrop {
   background: rgba(2, 6, 23, 0.78);
+}
+
+/* Doctor dashboard restore: keep top metrics horizontal after generic responsive metric rules. */
+.workspace .doctor-metric-grid.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.workspace .doctor-metric-grid .metric-card {
+  min-height: 116px;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "icon detail";
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .workspace .doctor-metric-grid.metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace .doctor-metric-grid.metric-grid {
+    grid-template-columns: 1fr;
+  }
 }

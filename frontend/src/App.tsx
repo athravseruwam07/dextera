@@ -104,18 +104,8 @@ import heroImage from "./assets/dextera-hero.png";
 
 type AuthRole = "doctor" | "patient";
 type EntryScreen = "landing" | "login";
-type ThemeMode = "light" | "dark";
 
 const rehabGameViews: ViewName[] = ["rehab-games", "rehab-calendar", "rehab-assistant"];
-const THEME_STORAGE_KEY = "dextera.theme";
-
-function loadThemeMode(): ThemeMode {
-  try {
-    return localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
-  } catch {
-    return "light";
-  }
-}
 
 function sideNavActive(navId: ViewName, current: ViewName) {
   if (navId === "rehab-games") return rehabGameViews.includes(current);
@@ -2139,9 +2129,7 @@ function AppShell({
   onLogout,
   currentEvent,
   backendConnected,
-  simulatorEnabled,
-  themeMode,
-  onThemeChange
+  simulatorEnabled
 	}: {
 	  children: React.ReactNode;
 	  view: ViewName;
@@ -2151,8 +2139,6 @@ function AppShell({
 	  currentEvent: GestureEvent;
   backendConnected: boolean;
   simulatorEnabled: boolean;
-  themeMode: ThemeMode;
-  onThemeChange: (themeMode: ThemeMode) => void;
 	}) {
 	  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
     const [settingsDialog, setSettingsDialog] = useState<"accounts" | "system-status" | null>(null);
@@ -2272,16 +2258,6 @@ function AppShell({
                     <Activity size={17} />
                     System status
                   </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      onThemeChange(themeMode === "dark" ? "light" : "dark");
-                      setSettingsMenuOpen(false);
-                    }}
-                  >
-                    {themeMode === "dark" ? "Light mode" : "Dark mode"}
-                  </button>
                   <button type="button" role="menuitem" className="settings-dropdown-danger" onClick={onLogout}>
                     <LogOut size={17} />
                     Sign out
@@ -2344,7 +2320,6 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>(demoAlerts);
   const [aiSummaries, setAiSummaries] = useState<Record<string, AiProgressSummary>>({});
   const [difficultyRecommendations, setDifficultyRecommendations] = useState<Record<string, DifficultyRecommendation>>({});
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
 
   useEffect(() => {
     if (!supabase) return;
@@ -2362,13 +2337,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.dataset.theme = "light";
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+      localStorage.removeItem("dextera.theme");
     } catch {
-      // Ignore storage failures; the in-memory theme still applies for this session.
+      // Ignore storage failures; the visual theme still applies for this session.
     }
-  }, [themeMode]);
+  }, []);
+
 
   const [selectedPatientId, setSelectedPatientId] = useState(seedPatients[0].id);
   const [view, setView] = useState<ViewName>("dashboard");
@@ -2741,8 +2717,6 @@ export default function App() {
 	          currentEvent={currentEvent}
 	          backendConnected={backendConnected}
 	          onSessionSaved={savePatientSession}
-            themeMode={themeMode}
-            onThemeChange={setThemeMode}
 	        />
 	      );
 	    }
@@ -2849,8 +2823,6 @@ export default function App() {
         assignedGames={clinicianAssignedGames}
         clinicAppointments={clinicianAppointmentSchedule}
         onLogout={handleLogout}
-        themeMode={themeMode}
-        onThemeChange={setThemeMode}
       />
     );
   }
@@ -2863,8 +2835,6 @@ export default function App() {
       currentEvent={currentEvent}
       backendConnected={backendConnected}
       simulatorEnabled={simulatorEnabled}
-      themeMode={themeMode}
-      onThemeChange={setThemeMode}
       onLogout={handleLogout}
     >
       {page}

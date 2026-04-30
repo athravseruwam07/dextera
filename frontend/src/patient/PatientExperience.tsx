@@ -363,8 +363,6 @@ export function PatientExperience({
   assignedGames,
   clinicAppointments,
   onLogout,
-  themeMode,
-  onThemeChange,
   experienceMode = "patient"
 }: {
   patient: Patient;
@@ -379,8 +377,6 @@ export function PatientExperience({
   /** Clinician Rehab Games sidebar: full catalog preview, disconnected from roster patient assignments. */
   experienceMode?: "patient" | "doctor-library";
   onLogout?: () => void;
-  themeMode?: "light" | "dark";
-  onThemeChange?: (themeMode: "light" | "dark") => void;
 }) {
   const [accessibilityMode, setAccessibilityMode] = useAccessibilityMode();
   const [route, setRoute] = useState<PatientRoute>({ step: "dashboard" });
@@ -725,8 +721,6 @@ export function PatientExperience({
           onAssistant={() => setRoute({ step: "assistant" })}
           accessibilityMode={accessibilityMode}
           setAccessibilityMode={setAccessibilityMode}
-          themeMode={themeMode}
-          onThemeChange={onThemeChange}
           onLogout={onLogout}
         >
           {content}
@@ -745,8 +739,6 @@ function PatientPortalShell({
   onAssistant,
   accessibilityMode,
   setAccessibilityMode,
-  themeMode,
-  onThemeChange,
   children,
   onLogout
 }: {
@@ -758,8 +750,6 @@ function PatientPortalShell({
   onAssistant: () => void;
   accessibilityMode: boolean;
   setAccessibilityMode: (value: boolean) => void;
-  themeMode?: "light" | "dark";
-  onThemeChange?: (themeMode: "light" | "dark") => void;
   children: React.ReactNode;
   onLogout?: () => void;
 }) {
@@ -855,18 +845,6 @@ function PatientPortalShell({
                   <Accessibility size={17} />
                   {accessibilityMode ? "Standard Mode" : "Accessibility"}
                 </button>
-                {themeMode && onThemeChange ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      onThemeChange(themeMode === "dark" ? "light" : "dark");
-                      setSettingsOpen(false);
-                    }}
-                  >
-                    {themeMode === "dark" ? "Light mode" : "Dark mode"}
-                  </button>
-                ) : null}
                 {onLogout ? (
                   <button type="button" role="menuitem" className="settings-dropdown-danger" onClick={onLogout}>
                     <LogOut size={17} />
