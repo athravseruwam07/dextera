@@ -230,7 +230,10 @@ th {
 
 .landing-page {
   min-height: 100vh;
-  background: #f8fafc;
+  background:
+    radial-gradient(circle at 14% 16%, rgba(37, 99, 235, 0.16), transparent 28%),
+    radial-gradient(circle at 82% 12%, rgba(15, 118, 110, 0.14), transparent 32%),
+    linear-gradient(135deg, var(--color-white) 0%, #eef6ff 48%, #f7f4ff 100%);
 }
 
 .landing-hero {
@@ -315,8 +318,9 @@ th {
 .landing-band {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--line);
+  gap: var(--space-4);
+  padding: var(--space-8);
+  background: transparent;
 }
 
 .landing-band article {
@@ -324,8 +328,10 @@ th {
   display: grid;
   align-content: center;
   gap: 0.45rem;
-  padding: clamp(1rem, 3vw, 2rem);
-  background: #fff;
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-white);
 }
 
 .landing-band strong {
@@ -7524,10 +7530,7 @@ th {
   align-content: stretch;
   gap: clamp(1rem, 4vw, 3rem);
   color: var(--text);
-  background:
-    radial-gradient(circle at 14% 16%, rgba(37, 99, 235, 0.16), transparent 28%),
-    radial-gradient(circle at 82% 12%, rgba(15, 118, 110, 0.14), transparent 32%),
-    linear-gradient(135deg, #ffffff 0%, #eef6ff 48%, #f7f4ff 100%);
+  background: transparent;
 }
 
 .landing-hero-split .landing-nav {
@@ -8066,11 +8069,30 @@ th {
   letter-spacing: -0.01em;
 }
 
-.landing-nav,
 .topbar,
 .patient-portal-topbar {
   background-color: var(--color-white);
   border-bottom-color: var(--color-border);
+}
+
+.landing-page .landing-nav {
+  background: transparent;
+  border-bottom-color: transparent;
+}
+
+.landing-page .landing-brand .brand-mark {
+  border: 2px solid var(--color-indigo);
+  background: var(--color-indigo-light);
+  color: var(--color-indigo-dark);
+  width: 50px;
+  height: 50px;
+}
+
+.landing-page .landing-nav-actions :is(.primary-button, .secondary-button) {
+  width: 150px;
+  min-height: 44px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .landing-brand,
@@ -8533,12 +8555,14 @@ th {
   }
 
   .patient-experience .assignment-card,
-  .patient-experience .rg-game-card {
+  .patient-experience .rg-game-card,
+  .landing-band article {
     transition: transform 0.18s ease, border-color 0.18s ease;
   }
 
   .patient-experience .assignment-card:hover,
-  .patient-experience .rg-game-card:hover {
+  .patient-experience .rg-game-card:hover,
+  .landing-band article:hover {
     transform: translateY(-3px);
     border-color: var(--color-border-strong);
   }
@@ -8591,6 +8615,21 @@ th {
 
 .text-success {
   color: var(--color-success-text);
+}
+
+/* layout-safe: landing feature cards must remain side by side on desktop after legacy responsive rules. */
+.landing-page .landing-band {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-top: calc(var(--space-10) * -1);
+  background: transparent;
+}
+
+@media (max-width: 760px) {
+  .landing-page .landing-band {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* layout-safe: keep top metrics horizontal after generic responsive metric rules; requested dashboard layout depends on this grid. */
