@@ -1,5 +1,25 @@
 const { query, withTransaction } = require("./db/pool");
 
+let exerciseAssignmentsReady = false;
+
+async function ensureExerciseAssignmentsTable() {
+  if (exerciseAssignmentsReady) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS exercise_assignments (
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+      exercise_id TEXT NOT NULL,
+      assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (patient_id, exercise_id)
+    )
+  `);
+  await query(`
+    CREATE INDEX IF NOT EXISTS exercise_assignments_patient_idx
+    ON exercise_assignments(patient_id, assigned_at DESC)
+  `);
+  exerciseAssignmentsReady = true;
+}
+
 function mapPatient(row) {
   return {
     id: row.id,
@@ -27,6 +47,15 @@ function mapSession(row) {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     notes: row.notes
+  };
+}
+
+function mapExerciseAssignment(row) {
+  return {
+    id: row.id,
+    patientId: row.patient_id,
+    exerciseId: row.exercise_id,
+    assignedAt: row.assigned_at
   };
 }
 
@@ -344,6 +373,50 @@ async function createExerciseResult(payload) {
   return result.rows[0];
 }
 
+async function listPatientExerciseAssignments(patientId) {
+  await ensureExerciseAssignmentsTable();
+  const result = await query(
+    `
+      SELECT *
+      FROM exercise_assignments
+      WHERE patient_id = $1
+      ORDER BY assigned_at DESC
+    `,
+    [patientId]
+  );
+  return result.rows.map(mapExerciseAssignment);
+}
+
+async function createExerciseAssignment(payload) {
+  await ensureExerciseAssignmentsTable();
+  const assignedAt =
+    payload.assignedAt instanceof Date
+      ? payload.assignedAt.toISOString()
+      : payload.assignedAt || new Date().toISOString();
+  const result = await query(
+    `
+      INSERT INTO exercise_assignments (id, patient_id, exercise_id, assigned_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (patient_id, exercise_id)
+      DO UPDATE SET assigned_at = EXCLUDED.assigned_at
+      RETURNING *
+    `,
+    [
+      payload.id || `exercise-assignment-${Date.now()}`,
+      payload.patientId,
+      payload.exerciseId,
+      assignedAt
+    ]
+  );
+  return mapExerciseAssignment(result.rows[0]);
+}
+
+async function deleteExerciseAssignment(id) {
+  await ensureExerciseAssignmentsTable();
+  const result = await query("DELETE FROM exercise_assignments WHERE id = $1 RETURNING id", [id]);
+  return result.rowCount > 0;
+}
+
 async function getPatientProgress(patientId) {
   const result = await query(
     `
@@ -425,6 +498,9 @@ module.exports = {
   listExercises,
   createExercise,
   createExerciseResult,
+  listPatientExerciseAssignments,
+  createExerciseAssignment,
+  deleteExerciseAssignment,
   getPatientProgress,
   createOrGetTherapist
 };

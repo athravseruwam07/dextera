@@ -116,6 +116,10 @@ Rep counting: a fist→open gesture transition increments `repsCompleted`.
 
 `src/lib/gesture.ts` contains pure gesture utilities (classification, accuracy scoring, patient summaries). This is the only tested file (`gesture.test.ts` via Vitest).
 
+Patient portal sign-in in `src/App.tsx` checks backend health independently of the doctor dashboard, then loads `/api/patients/:id/assignments`; local patient identity is persisted in `dextera.localPatientSession.v1` so refreshing `/patient/plan` reloads the same patient's clinician-created rehab game assignments without requiring logout/login.
+
+Clinician-assigned finger exercises use the same refreshable flow: `src/exercises/ExercisesPage.tsx` writes through `/api/exercise-assignments`, and the patient portal loads `/api/patients/:id/exercise-assignments` so drills appear after refreshing the patient dashboard.
+
 ### VR — two implementations
 
 The VR game exists in two places:

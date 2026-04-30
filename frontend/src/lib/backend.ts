@@ -1,4 +1,5 @@
 import { exerciseTemplates, seedPatients } from "../data/mockData";
+import type { ExerciseAssignment } from "../data/exercises";
 import type {
   AiProgressSummary,
   Alert,
@@ -563,6 +564,36 @@ export async function deleteAssignment(id: string): Promise<void> {
     });
     if (!response.ok) {
       throw new Error(`Backend request failed: ${response.status} ${response.statusText}`);
+    }
+  } finally {
+    clear();
+  }
+}
+
+export async function fetchExerciseAssignments(patientId: string): Promise<ExerciseAssignment[]> {
+  return apiFetch<ExerciseAssignment[]>(`/api/patients/${patientId}/exercise-assignments`);
+}
+
+export async function createExerciseAssignment(payload: Omit<ExerciseAssignment, "id" | "assignedAt"> & { assignedAt?: string }) {
+  return apiFetch<ExerciseAssignment>("/api/exercise-assignments", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteExerciseAssignment(id: string): Promise<void> {
+  const { signal, clear } = timeoutSignal(2500);
+  const authHeader = await getAuthHeader();
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/exercise-assignments/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      signal,
+      headers: {
+        ...authHeader
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`Exercise assignment delete failed (${response.status})`);
     }
   } finally {
     clear();

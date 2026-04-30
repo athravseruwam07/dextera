@@ -39,8 +39,10 @@ import {
   connectGestureStream,
   createAppointment,
   createAssignment,
+  createExerciseAssignment,
   createBackendPatientProfile,
   deleteAssignment,
+  deleteExerciseAssignment,
   endBackendSession,
   fetchAlerts,
   fetchAppointments,
@@ -48,6 +50,7 @@ import {
   fetchBackendPatient,
   fetchBackendPatients,
   fetchDifficultyRecommendation,
+  fetchExerciseAssignments,
   generateAiSummary,
   requestFakeGestureForSession,
   requestFakeGesture,
@@ -113,6 +116,40 @@ const productionDoctorAccount = {
   email: "doctor@dextera.app",
   password: "DexteraDoctor2026!"
 };
+
+const localPatientSessionKey = "dextera.localPatientSession.v1";
+
+type LocalPatientSession = {
+  email: string;
+  fullName?: string;
+};
+
+function readLocalPatientSession(): LocalPatientSession | null {
+  try {
+    const raw = localStorage.getItem(localPatientSessionKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<LocalPatientSession>;
+    return parsed.email ? { email: parsed.email, fullName: parsed.fullName } : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalPatientSession(session: LocalPatientSession) {
+  try {
+    localStorage.setItem(localPatientSessionKey, JSON.stringify(session));
+  } catch {
+    // Ignore storage failures; the current login flow can still continue in memory.
+  }
+}
+
+function clearLocalPatientSession() {
+  try {
+    localStorage.removeItem(localPatientSessionKey);
+  } catch {
+    // Ignore storage failures on logout.
+  }
+}
 
 type AppRoute =
   | { kind: "landing" }
@@ -233,6 +270,13 @@ const demoDoctor = {
   name: "Dr. Singh",
   specialty: "Physiotherapist"
 };
+
+const demoPatientIds = new Set(["patient-1", "patient-2", "patient-3", "demo-patient-1", "demo-patient-2", "demo-patient-3"]);
+const demoPatientNames = new Set(["Maya Patel", "Daniel Lee", "Amira Khan"]);
+
+function isDemoPatient(patient: Pick<Patient, "id" | "name">) {
+  return demoPatientIds.has(patient.id) || demoPatientNames.has(patient.name);
+}
 
 const strongestGames: Game[] = [
   {
@@ -531,7 +575,7 @@ function LoginPage({
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState(role === "doctor" ? productionDoctorAccount.email : "");
   const [password, setPassword] = useState(role === "doctor" ? productionDoctorAccount.password : "");
-  const [isSignUp, setIsSignUp] = useState(role === "patient");
+  const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -793,7 +837,7 @@ function PatientWorkspaceShell({
 
   return (
     <section className="page-stack">
-	      <div className="profile-hero patient-summary-card">
+      <div className={`profile-hero patient-summary-card ${activeTab === "plan" ? "patient-summary-card--plan" : ""}`}>
 	        <div>
 	          <span className="eyebrow">Patient workspace</span>
 	          <h2>{patient.name}</h2>
@@ -1126,18 +1170,18 @@ function AssignmentForm({
   };
 
   return (
-    <form className="inline-form" onSubmit={submit}>
-      <div className="form-row">
-        <label>
-          Game
+    <form className="assignment-form" onSubmit={submit}>
+      <div className="assignment-form-grid assignment-form-grid--primary">
+        <label className="assignment-field assignment-field--wide">
+          <span>Game</span>
           <select value={gameId} onChange={(event) => setGameId(event.target.value)}>
             {strongestGames.map((item) => (
               <option key={item.id} value={item.id}>{item.name}</option>
             ))}
           </select>
         </label>
-        <label>
-          Difficulty
+        <label className="assignment-field">
+          <span>Difficulty</span>
           <select value={difficulty} onChange={(event) => setDifficulty(event.target.value as Assignment["difficulty"])}>
             <option value="easy">Easy</option>
             <option value="medium">Medium</option>
@@ -1145,19 +1189,19 @@ function AssignmentForm({
           </select>
         </label>
       </div>
-      <div className="form-row">
-        <label>
-          Reps
+      <div className="assignment-form-grid">
+        <label className="assignment-field">
+          <span>Reps</span>
           <input type="number" min={0} value={reps} onChange={(event) => setReps(Number(event.target.value))} />
         </label>
-        <label>
-          Rounds
+        <label className="assignment-field">
+          <span>Rounds</span>
           <input type="number" min={0} value={rounds} onChange={(event) => setRounds(Number(event.target.value))} />
         </label>
       </div>
-      <div className="form-row">
-        <label>
-          Frequency
+      <div className="assignment-form-grid">
+        <label className="assignment-field">
+          <span>Frequency</span>
           <select value={frequency} onChange={(event) => setFrequency(event.target.value)}>
             <option value="daily">Daily</option>
             <option value="3x/week">3x/week</option>
@@ -1165,21 +1209,21 @@ function AssignmentForm({
             <option value="weekly">Weekly</option>
           </select>
         </label>
-        <label>
-          Due date
+        <label className="assignment-field">
+          <span>Due date</span>
           <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
         </label>
       </div>
-      <label>
-        Target skill
+      <label className="assignment-field">
+        <span>Target skill</span>
         <input value={targetSkill} onChange={(event) => setTargetSkill(event.target.value)} />
       </label>
-      <label>
-        Notes
+      <label className="assignment-field">
+        <span>Notes</span>
         <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Assignment notes" />
       </label>
 	      {message && <InlineAlert tone={message.includes("Unable") || message.includes("Please") ? "warning" : "success"}>{message}</InlineAlert>}
-	      <button className="primary-button" type="submit" disabled={saving}>
+	      <button className="primary-button assignment-submit" type="submit" disabled={saving}>
 	        <Plus size={18} />
 	        {saving ? "Saving assignment..." : "Assign exercise"}
 	      </button>
@@ -1417,26 +1461,38 @@ function ProfilePage({
       )}
 
       {activeTab === "plan" && (
-      <div className="two-column">
-        <article className="surface">
-          <div className="section-title">
-            <h3>Current plan</h3>
-            <span>{patientAssignmentList.length} assignments</span>
+      <div className="care-plan-layout">
+        <article className="care-plan-panel care-plan-current">
+          <div className="care-plan-section-header">
+            <div>
+              <span className="eyebrow">Current Plan</span>
+              <h3>Assigned rehab</h3>
+            </div>
+            <span>{patientAssignmentList.length} active</span>
           </div>
-          <div className="stack-list">
+          <div className="plan-card-list">
 	            {patientAssignmentList.length === 0 ? (
-	              <EmptyState title="No active assignments" description="Assign one of the four demo-ready rehab games to build today's plan." />
+	              <div className="plan-empty-card">
+	                <EmptyState title="No active assignments" description="Choose a rehab game to build this patient's plan." />
+	              </div>
             ) : (
               patientAssignmentList.map((assignment) => (
-                <div className="list-card" key={assignment.id}>
-                  <div className="section-title">
-                    <strong>{assignment.gameName}</strong>
+                <div className="plan-assignment-card" key={assignment.id}>
+                  <div className="plan-assignment-top">
+                    <div>
+                      <strong>{assignment.gameName}</strong>
+                      <p>{assignment.targetSkill}</p>
+                    </div>
                     <StatusBadge status={assignment.status} />
                   </div>
-                  <p>{assignment.difficulty} · {assignment.reps ? `${assignment.reps} reps` : `${assignment.rounds} rounds`} · {assignment.frequency}</p>
-                  <p>Due {assignment.dueDate} · {assignment.targetSkill}</p>
+                  <div className="plan-assignment-meta">
+                    <span>{assignment.difficulty}</span>
+                    <span>{assignment.reps ? `${assignment.reps} reps` : `${assignment.rounds} rounds`}</span>
+                    <span>{assignment.frequency}</span>
+                    <span>Due {assignment.dueDate}</span>
+                  </div>
                   {assignment.notes && <p>{assignment.notes}</p>}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.65rem" }}>
+                  <div className="plan-assignment-actions">
                     <button
                       className="secondary-button"
                       type="button"
@@ -1470,9 +1526,12 @@ function ProfilePage({
           </div>
         </article>
 
-        <article className="surface">
-          <div className="section-title">
-            <h3>Assign new exercise</h3>
+        <article className="care-plan-panel care-plan-assign">
+          <div className="care-plan-section-header">
+            <div>
+              <span className="eyebrow">Assign Exercise</span>
+              <h3>New rehab game</h3>
+            </div>
             <Plus size={18} />
           </div>
           <AssignmentForm patientId={patient.id} onCreate={onCreateAssignment} />
@@ -2265,7 +2324,7 @@ function AppShell({
 	    view === "patient"
 	      ? `${patient.condition || patient.diagnosis} · ${patient.affectedHand || "right"} hand · ${String(patient.status).replace(/_/g, " ")}`
 	      : rehabGameViews.includes(view)
-	        ? `${demoDoctor.specialty} · Full Rehab Games catalog — previews are not tied to a single patient record`
+	        ? demoDoctor.specialty
 	        : `${demoDoctor.name} · Rehab workspace`;
 
     useEffect(() => {
@@ -2436,13 +2495,11 @@ export default function App() {
           baselineMobility: 40,
           sessions: []
         }]
-      : productionAuth
-        ? []
-        : seedPatients
+      : []
   );
-  const [assignments, setAssignments] = useState<Assignment[]>(productionAuth ? [] : demoAssignments);
-  const [appointments, setAppointments] = useState<Appointment[]>(productionAuth ? [] : demoAppointments);
-  const [alerts, setAlerts] = useState<Alert[]>(productionAuth ? [] : demoAlerts);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [aiSummaries, setAiSummaries] = useState<Record<string, AiProgressSummary>>({});
   const [difficultyRecommendations, setDifficultyRecommendations] = useState<Record<string, DifficultyRecommendation>>({});
   const [exerciseAssignments, setExerciseAssignments] = useState<ExerciseAssignment[]>([]);
@@ -2473,7 +2530,7 @@ export default function App() {
 
 
   const [selectedPatientId, setSelectedPatientId] = useState(
-    initialRoute.kind === "doctor" && initialRoute.patientId ? initialRoute.patientId : productionAuth ? "" : seedPatients[0].id
+    initialRoute.kind === "doctor" && initialRoute.patientId ? initialRoute.patientId : ""
   );
   const [view, setView] = useState<ViewName>(initialRoute.kind === "doctor" ? initialRoute.view : "dashboard");
   const [patientTab, setPatientTab] = useState<PatientTab>(
@@ -2491,7 +2548,7 @@ export default function App() {
       : null
   );
   const [currentEvent, setCurrentEvent] = useState<GestureEvent>(() =>
-    createGestureEvent(productionAuth ? "patient-loading" : seedPatients[0].id, "open")
+    createGestureEvent("patient-loading", "open")
   );
   const [simulatorEnabled, setSimulatorEnabled] = useState(true);
   const [backendConnected, setBackendConnected] = useState(false);
@@ -2637,7 +2694,7 @@ export default function App() {
             return;
           }
         }
-        const backendPatients = await fetchBackendPatients();
+        const backendPatients = (await fetchBackendPatients()).filter((patient) => !isDemoPatient(patient));
         if (cancelled) return;
 
         setPatients(backendPatients);
@@ -2645,19 +2702,22 @@ export default function App() {
           backendPatients.some((patient) => patient.id === current) ? current : backendPatients[0]?.id ?? ""
         );
         setBackendConnected(true);
+        const realPatientIds = new Set(backendPatients.map((patient) => patient.id));
         const [backendAlerts, backendAppointments] = await Promise.all([
-          fetchAlerts().catch(() => productionAuth ? [] : demoAlerts),
-          fetchAppointments().catch(() => productionAuth ? [] : demoAppointments)
+          fetchAlerts().catch(() => []),
+          fetchAppointments().catch(() => [])
         ]);
         if (!cancelled) {
-          setAlerts(backendAlerts);
-          setAppointments(backendAppointments);
+          setAlerts(backendAlerts.filter((alert) => realPatientIds.has(alert.patientId)));
+          setAppointments(backendAppointments.filter((appointment) => realPatientIds.has(appointment.patientId)));
           const assignmentLists = await Promise.all(
             backendPatients.map((patient) => fetchAssignments(patient.id).catch(() => []))
           );
-          if (!cancelled && assignmentLists.flat().length) {
-            setAssignments(assignmentLists.flat());
-          }
+          if (!cancelled) setAssignments(assignmentLists.flat());
+          const exerciseAssignmentLists = await Promise.all(
+            backendPatients.map((patient) => fetchExerciseAssignments(patient.id).catch(() => []))
+          );
+          if (!cancelled) setExerciseAssignments(exerciseAssignmentLists.flat());
         }
       } catch {
         if (!cancelled) {
@@ -2674,13 +2734,13 @@ export default function App() {
   }, [authRole, loggedIn, productionAuth]);
 
   useEffect(() => {
-    if (!backendConnected) return;
+    if (!backendConnected || !selectedPatientId) return;
     return connectGestureStream(selectedPatientId, captureGestureEvent, setBackendConnected);
   }, [backendConnected, captureGestureEvent, selectedPatientId]);
 
   // Also subscribe to the bridge's default patient so real glove events always flow in
   useEffect(() => {
-    if (!backendConnected || selectedPatientId === "demo-patient-1") return;
+    if (!backendConnected || !selectedPatientId || selectedPatientId === "demo-patient-1") return;
     return connectGestureStream("demo-patient-1", captureGestureEvent);
   }, [backendConnected, captureGestureEvent, selectedPatientId]);
 
@@ -2700,6 +2760,7 @@ export default function App() {
 
   useEffect(() => {
     if (!simulatorEnabled) return;
+    if (!selectedPatientId) return;
     const interval = window.setInterval(() => {
       async function captureNextEvent() {
         if (backendConnected) {
@@ -2736,14 +2797,21 @@ export default function App() {
 
   const refreshPatientSideData = async (patientId: string) => {
     if (!backendConnected) return;
-    const [nextAssignments, nextAppointments, nextAlerts] = await Promise.all([
+    const [nextAssignments, nextAppointments, nextAlerts, nextExerciseAssignments] = await Promise.all([
       fetchAssignments(patientId).catch(() => patientAssignments(patientId, assignments)),
       fetchAppointments(patientId).catch(() => appointments.filter((appointment) => appointment.patientId === patientId)),
-      fetchAlerts(patientId).catch(() => patientAlerts(patientId, alerts))
+      fetchAlerts(patientId).catch(() => patientAlerts(patientId, alerts)),
+      fetchExerciseAssignments(patientId).catch(() =>
+        exerciseAssignments.filter((assignment) => assignment.patientId === patientId)
+      )
     ]);
     setAssignments((items) => [...items.filter((item) => item.patientId !== patientId), ...nextAssignments]);
     setAppointments((items) => [...items.filter((item) => item.patientId !== patientId), ...nextAppointments]);
     setAlerts((items) => [...items.filter((item) => item.patientId !== patientId), ...nextAlerts]);
+    setExerciseAssignments((items) => [
+      ...items.filter((assignment) => assignment.patientId !== patientId),
+      ...nextExerciseAssignments
+    ]);
   };
 
   const handleCreateAssignment = async (
@@ -2783,6 +2851,46 @@ export default function App() {
       return;
     }
     setAssignments((items) => items.filter((item) => item.id !== assignmentId));
+  };
+
+  const handleAssignExercise = async (patientId: string, exerciseId: string) => {
+    if (backendConnected) {
+      try {
+        const created = await createExerciseAssignment({ patientId, exerciseId });
+        setExerciseAssignments((items) => [
+          created,
+          ...items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId)
+        ]);
+        await refreshPatientSideData(patientId);
+        return;
+      } catch {
+        setBackendConnected(false);
+      }
+    }
+    setExerciseAssignments((items) => [
+      {
+        id: `exercise-assignment-${Date.now()}`,
+        patientId,
+        exerciseId,
+        assignedAt: new Date().toISOString()
+      },
+      ...items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId)
+    ]);
+  };
+
+  const handleUnassignExercise = async (assignmentId: string) => {
+    const assignment = exerciseAssignments.find((item) => item.id === assignmentId);
+    if (backendConnected) {
+      try {
+        await deleteExerciseAssignment(assignmentId);
+        setExerciseAssignments((items) => items.filter((item) => item.id !== assignmentId));
+        if (assignment) await refreshPatientSideData(assignment.patientId);
+        return;
+      } catch {
+        setBackendConnected(false);
+      }
+    }
+    setExerciseAssignments((items) => items.filter((item) => item.id !== assignmentId));
   };
 
   const handleCreateAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
@@ -2924,11 +3032,16 @@ export default function App() {
   const loadPatientAccount = async (email: string, fullName?: string) => {
     const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
     const userId = data.user?.id ?? `patient-${email.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const storedSession = !supabase ? readLocalPatientSession() : null;
     const displayName =
       fullName?.trim() ||
+      storedSession?.fullName?.trim() ||
       String(data.user?.user_metadata?.full_name || "").trim() ||
       email.split("@")[0] ||
       "Patient";
+    if (!supabase) {
+      writeLocalPatientSession({ email: email.trim(), fullName: displayName });
+    }
     let patient: Patient = {
       id: userId,
       userId,
@@ -2947,7 +3060,19 @@ export default function App() {
       sessions: []
     };
 
-    if (backendConnected || supabase) {
+    let patientBackendConnected = backendConnected;
+    if (!patientBackendConnected) {
+      try {
+        await checkBackendHealth();
+        patientBackendConnected = true;
+        setBackendConnected(true);
+      } catch {
+        patientBackendConnected = false;
+        setBackendConnected(false);
+      }
+    }
+
+    if (patientBackendConnected || supabase) {
       try {
         patient = await fetchBackendPatient(userId);
       } catch {
@@ -2962,14 +3087,19 @@ export default function App() {
     setPatients([patient]);
     setSelectedPatientId(patient.id);
     setCurrentEvent(createGestureEvent(patient.id, "open"));
-    const [nextAssignments, nextAppointments, nextAlerts] = await Promise.all([
-      fetchAssignments(patient.id).catch(() => []),
-      fetchAppointments(patient.id).catch(() => []),
-      fetchAlerts(patient.id).catch(() => [])
-    ]);
+    const [nextAssignments, nextAppointments, nextAlerts, nextExerciseAssignments] =
+      patientBackendConnected || supabase
+        ? await Promise.all([
+            fetchAssignments(patient.id).catch(() => []),
+            fetchAppointments(patient.id).catch(() => []),
+            fetchAlerts(patient.id).catch(() => []),
+            fetchExerciseAssignments(patient.id).catch(() => [])
+          ])
+        : [[], [], [], []];
     setAssignments(nextAssignments);
     setAppointments(nextAppointments);
     setAlerts(nextAlerts);
+    setExerciseAssignments(nextExerciseAssignments);
   };
 
   useEffect(() => {
@@ -2983,6 +3113,18 @@ export default function App() {
       cancelled = true;
     };
   }, [authRole, loggedIn]);
+
+  useEffect(() => {
+    if (!loggedIn || authRole !== "patient" || supabase) return;
+    const session = readLocalPatientSession();
+    if (!session) {
+      setLoggedIn(false);
+      setEntryScreen("login");
+      navigateTo("/patient/sign-in", true);
+      return;
+    }
+    void loadPatientAccount(session.email, session.fullName);
+  }, [authRole, loggedIn, navigateTo]);
 
   const page = (() => {
     if (view === "dashboard") {
@@ -3010,20 +3152,8 @@ export default function App() {
         <ExercisesPage
           patients={patients}
           assignments={exerciseAssignments}
-          onAssign={(patientId, exerciseId) =>
-            setExerciseAssignments((items) => [
-              {
-                id: `exercise-assignment-${Date.now()}`,
-                patientId,
-                exerciseId,
-                assignedAt: new Date().toISOString()
-              },
-              ...items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId)
-            ])
-          }
-          onUnassign={(assignmentId) =>
-            setExerciseAssignments((items) => items.filter((assignment) => assignment.id !== assignmentId))
-          }
+          onAssign={handleAssignExercise}
+          onUnassign={handleUnassignExercise}
         />
       );
     }
@@ -3151,6 +3281,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase?.auth.signOut();
+    clearLocalPatientSession();
     setLoggedIn(false);
     setEntryScreen("landing");
     navigateTo("/");

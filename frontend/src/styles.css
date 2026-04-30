@@ -890,6 +890,226 @@ th {
   gap: 1rem;
 }
 
+.patient-summary-card--plan {
+  padding: 1rem 1.1rem;
+  border-color: rgba(203, 213, 225, 0.78);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9)),
+    var(--surface);
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.045);
+}
+
+.patient-summary-card--plan h2 {
+  margin-bottom: 0.18rem;
+  font-size: clamp(1.45rem, 2vw, 1.9rem);
+}
+
+.patient-summary-card--plan p {
+  margin: 0.12rem 0;
+  color: #64748b;
+  font-size: 0.92rem;
+}
+
+.patient-summary-card--plan .summary-metrics span {
+  border-color: rgba(203, 213, 225, 0.72);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: none;
+}
+
+.care-plan-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.82fr) minmax(360px, 1.18fr);
+  align-items: start;
+  gap: 1rem;
+}
+
+.care-plan-panel {
+  padding: clamp(1rem, 1.7vw, 1.25rem);
+  border: 1px solid rgba(203, 213, 225, 0.74);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.045);
+}
+
+.care-plan-current {
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.care-plan-assign {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.84)),
+    var(--surface);
+}
+
+.care-plan-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+  margin-bottom: 0.85rem;
+}
+
+.care-plan-section-header h3 {
+  margin: 0.12rem 0 0;
+  color: #0f172a;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.care-plan-section-header > span,
+.care-plan-section-header > svg {
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+.care-plan-section-header > span {
+  padding: 0.32rem 0.56rem;
+  border: 1px solid rgba(203, 213, 225, 0.75);
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.9);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.plan-card-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.plan-empty-card {
+  max-width: 420px;
+}
+
+.plan-empty-card .empty-state {
+  min-height: 0;
+  padding: 0.9rem;
+  border: 1px dashed rgba(148, 163, 184, 0.72);
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.72);
+  text-align: left;
+}
+
+.plan-empty-card .empty-state p {
+  max-width: 28rem;
+  margin: 0.25rem 0 0;
+}
+
+.plan-assignment-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(203, 213, 225, 0.72);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.035);
+}
+
+.plan-assignment-top,
+.plan-assignment-actions,
+.plan-assignment-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.plan-assignment-top {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.plan-assignment-top strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.98rem;
+}
+
+.plan-assignment-top p,
+.plan-assignment-card > p {
+  margin: 0.18rem 0 0;
+  color: #64748b;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.plan-assignment-meta span {
+  padding: 0.28rem 0.48rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.plan-assignment-actions {
+  margin-top: 0.1rem;
+}
+
+.plan-assignment-actions .secondary-button,
+.plan-assignment-actions .danger-button {
+  min-height: 38px;
+  padding: 0.55rem 0.72rem;
+  box-shadow: none;
+}
+
+.assignment-form {
+  display: grid;
+  gap: 0.72rem;
+  margin-top: 0.25rem;
+}
+
+.assignment-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.assignment-form-grid--primary {
+  grid-template-columns: minmax(0, 1.35fr) minmax(150px, 0.65fr);
+}
+
+.assignment-field {
+  display: grid;
+  gap: 0.34rem;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.assignment-field span {
+  padding-left: 0.05rem;
+}
+
+.assignment-form :is(input, select, textarea) {
+  min-height: 42px;
+  border-color: rgba(203, 213, 225, 0.9);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+}
+
+.assignment-form textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.assignment-form :is(input, select, textarea):focus {
+  border-color: rgba(15, 118, 110, 0.68);
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.11);
+}
+
+.assignment-submit {
+  width: fit-content;
+  justify-self: end;
+  min-height: 44px;
+  padding-inline: 1.05rem;
+  border-radius: 14px;
+  box-shadow: 0 12px 22px rgba(15, 118, 110, 0.18);
+}
+
 .detail-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1217,6 +1437,34 @@ th {
   .landing-band,
   .patient-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .care-plan-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-empty-card {
+    max-width: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .patient-summary-card--plan {
+    align-items: stretch;
+  }
+
+  .care-plan-panel {
+    border-radius: 18px;
+  }
+
+  .assignment-form-grid,
+  .assignment-form-grid--primary {
+    grid-template-columns: 1fr;
+  }
+
+  .assignment-submit {
+    width: 100%;
+    justify-content: center;
   }
 }
 

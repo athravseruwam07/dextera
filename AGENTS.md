@@ -145,7 +145,9 @@ Patient portal uses its own shell in `frontend/src/patient/PatientExperience.tsx
 
 Patient assignments, appointments, tutorials, and local result persistence live in `patientData.ts`; session results are stored in localStorage under `gloving.patient.sessionResults.v1` and also converted to the existing `RehabSession` shape so therapist progress/dashboard views can show saved patient game results. `patientApi.ts` tries the existing backend session start/end endpoints when connected, then always keeps the full patient result locally for the demo.
 
-`frontend/src/data/exercises.ts` defines basic clinician-assignable finger exercises, and `frontend/src/exercises/ExercisesPage.tsx` is the therapist-facing assignment page exposed from the main sidebar as **Exercises**. Exercise assignments are held in frontend state only. Patient portal home receives those assignments via `PatientExperience`, shows them alongside rehab games, and includes an exercise detail/play/results flow. The play screen uses `patient/input.tsx` live finger bend percentages to count a rep when the target finger group bends and then releases; the **Demo Rep** button emits a local bend/release fallback for demos without glove hardware.
+When a patient signs into the portal, `App.tsx` actively checks backend health even if the doctor dashboard has not loaded yet, then fetches `/api/patients/:id/assignments`; local patient identity is persisted in `dextera.localPatientSession.v1` so refreshing `/patient/plan` reloads the same patient's clinician-created rehab game assignments without requiring logout/login.
+
+`frontend/src/data/exercises.ts` defines basic clinician-assignable finger exercises, and `frontend/src/exercises/ExercisesPage.tsx` is the therapist-facing assignment page exposed from the main sidebar as **Exercises**. Exercise assignments are persisted through `/api/exercise-assignments` and loaded from `/api/patients/:id/exercise-assignments`, so doctor-side assignment and patient refresh use the same backend-backed flow as rehab game assignments. Patient portal home receives those assignments via `PatientExperience`, shows them alongside rehab games, and includes an exercise detail/play/results flow. The play screen uses `patient/input.tsx` live finger bend percentages to count a rep when the target finger group bends and then releases; the **Demo Rep** button emits a local bend/release fallback for demos without glove hardware.
 
 `patient/input.tsx` is the shared patient input abstraction. It exposes the current gesture, finger bends, raw glove values, hand position, and event history. Patient-facing input is Smart Glove only; when no glove stream is available, the provider emits local demo gesture events without moving the hand position so localhost demos do not auto-drift. `patient/gameRegistry.ts` is the patient-game manifest that maps each game to its glove mode, calibration requirements, fullscreen need, audio flag, and expected metrics. The provider has game-specific hardware modes: Ball Pickup uses calibrated open/fist only, and Finger Tap uses raw glove polling plus calibrated per-finger tap detection to emit `tap_*` events. Other patient games still support `tap` and `flick` gestures in addition to the original glove gestures. Patient calibration is a guided live sequence: Start Calibration, hold each prompted shape for 3 seconds, and watch the live 3D hand preview while fresh unique raw samples are averaged and quality-checked for that target.
 
@@ -163,6 +165,10 @@ The current checkout only includes `frontend/src/vr/`, the legacy embedded dashb
 | `DATABASE_URL` | `postgres://gloving:gloving@localhost:55432/gloving` | |
 | `STORAGE_MODE` | `mock` | `mock` or `postgres` |
 | `CORS_ORIGIN` | `*` | |
+| `SUPABASE_URL` | | Required for authenticated API routes in Postgres/prod mode |
+| `SUPABASE_SERVICE_ROLE_KEY` | | Preferred backend token verification key; never expose to frontend |
+| `SUPABASE_ANON_KEY` | | Backend fallback for Supabase Auth token introspection if no service role key is set |
+| `SUPABASE_JWT_SECRET` | | Optional legacy HS256 JWT verification secret; newer asymmetric Supabase tokens use `SUPABASE_URL` + API key instead |
 
 Frontend reads `VITE_API_BASE_URL` (default `http://127.0.0.1:4000`) and `VITE_WS_URL` from env.
 
