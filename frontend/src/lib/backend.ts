@@ -591,6 +591,23 @@ export async function generateAiSummary(patientId: string): Promise<AiProgressSu
   });
 }
 
+export async function askPatientAssistant(payload: {
+  patient: Patient;
+  assignments: unknown[];
+  results: unknown[];
+  message: string;
+  experienceMode?: "patient" | "doctor-library";
+}): Promise<{ message: string; source?: "gemini" | "fallback"; configured?: boolean }> {
+  return apiFetch(
+    "/api/ai/patient-chat",
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    },
+    12000
+  );
+}
+
 export async function fetchDifficultyRecommendation(patientId: string): Promise<DifficultyRecommendation> {
   return apiFetch<DifficultyRecommendation>(`/api/patients/${patientId}/difficulty-recommendation`);
 }

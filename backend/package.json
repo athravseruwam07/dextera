@@ -11,9 +11,10 @@
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
     "simulate": "node scripts/simulate-glove.js",
-    "check": "node --check src/server.js && node --check src/mockRepository.js && node --check scripts/migrate.js && node --check scripts/seed.js && node --check scripts/simulate-glove.js"
+    "check": "node --check src/server.js && node --check src/gemini.js && node --check src/mockRepository.js && node --check scripts/migrate.js && node --check scripts/seed.js && node --check scripts/simulate-glove.js"
   },
   "dependencies": {
+    "@google/genai": "^1.51.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

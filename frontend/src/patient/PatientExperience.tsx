@@ -37,6 +37,7 @@ import {
   YAxis
 } from "recharts";
 import { fingerNames, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
+import { askPatientAssistant } from "../lib/backend";
 import type {
   CalibrationData,
   CheckIn,
@@ -2557,6 +2558,11 @@ function PatientAssistant({
     }
   ]);
   const [draft, setDraft] = useState("");
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const assistantAssignments = useMemo(
+    () => (assignments.length > 0 ? assignments : createPatientAssignments(patient.id)),
+    [assignments, patient.id]
+  );
 
   const respond = (question: string) => {
     const lower = question.toLowerCase();
@@ -2565,25 +2571,41 @@ function PatientAssistant({
       return "I cannot diagnose symptoms or give treatment advice. Stop the exercise if needed, contact your clinician for medical concerns, and seek urgent care for severe or sudden symptoms.";
     }
     if (lower.includes("assigned") || lower.includes("exercise") || lower.includes("game")) {
-      return `Today you have ${assignments.map((assignment) => assignment.name).join(", ")}. Start with Ball Pickup for a short first session.`;
+      return `Today you have ${assistantAssignments.map((assignment) => assignment.name).join(", ")}. Start with a short, careful session.`;
     }
     if (lower.includes("how") || lower.includes("play")) {
-      const game = assignments.find((assignment) => lower.includes(assignment.name.toLowerCase().split(" ")[0]));
+      const knownGame = Object.entries(gameTutorials).find(([gameId, tutorial]) => {
+        const title = tutorial.title.toLowerCase();
+        return lower.includes(title) || lower.includes(gameId.replace(/-/g, " "));
+      });
+      const game = assistantAssignments.find((assignment) => lower.includes(assignment.name.toLowerCase().split(" ")[0]));
+      if (knownGame) {
+        const tutorial = knownGame[1];
+        return `${tutorial.title}: ${tutorial.steps.join(" ")}`;
+      }
       const tutorial = game ? gameTutorials[game.gameId] : gameTutorials["ball-pickup"];
       return `${tutorial.title}: ${tutorial.steps.join(" ")}`;
     }
     if (lower.includes("score") || lower.includes("accuracy")) {
-      return "Accuracy estimates how closely your gestures matched the target movement. Failed attempts are missed drops, wrong taps, wrong bubbles, or missed flicks.";
+      const latest = results[0];
+      return latest
+        ? `Your latest saved result is ${latest.gameName} with ${latest.accuracy}% accuracy and ${latest.repsCompleted} completed reps. Accuracy estimates how closely your gestures matched the target movement.`
+        : "Accuracy estimates how closely your gestures matched the target movement. I do not see a saved game result in this browser yet.";
     }
-    if (lower.includes("rep") || lower.includes("left")) {
+    if (lower.includes("rep") || lower.includes("left") || lower.includes("remaining") || lower.includes("today")) {
       const completedToday = new Set(results.filter((result) => new Date(result.startedAt).toDateString() === new Date().toDateString()).map((result) => result.assignmentId));
-      const repsLeft = assignments
+      const repsLeft = assistantAssignments
         .filter((assignment) => !completedToday.has(assignment.id))
         .reduce((sum, assignment) => sum + assignment.config.targetReps, 0);
-      return `You have about ${repsLeft} assigned reps left today. Move slowly and rest between games.`;
+      const assignedTotal = assistantAssignments.reduce((sum, assignment) => sum + assignment.config.targetReps, 0);
+      return `You have about ${repsLeft} assigned reps left today out of ${assignedTotal}. Move slowly and rest between games.`;
     }
-    if (lower.includes("note") || lower.includes("doctor")) {
-      return assignments.map((assignment) => `${assignment.name}: ${assignment.doctorNotes}`).join(" ");
+    if (lower.includes("note") || lower.includes("doctor") || lower.includes("doc") || lower.includes("clinician")) {
+      const notes = [
+        patient.notes,
+        ...assistantAssignments.map((assignment) => `${assignment.name}: ${assignment.doctorNotes || assignment.doctorInstructions}`)
+      ].filter(Boolean);
+      return notes.length ? notes.join(" ") : "I do not see clinician notes in this context yet.";
     }
     if (lower.includes("motivat") || lower.includes("encourage")) {
       return "A short, careful session still counts. Focus on smooth control and stop if your hand needs rest.";
@@ -2591,16 +2613,51 @@ function PatientAssistant({
     return `For ${experienceMode === "doctor-library" ? `${patient.name} (library workspace)` : patient.name}, I can help with assigned exercises, how to play each game, what scores mean, reps left, doctor notes, and motivation.`;
   };
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const question = draft.trim();
-    if (!question) return;
+    if (!question || assistantBusy) return;
     setDraft("");
+    setAssistantBusy(true);
+    const patientMessage: AssistantMessage = {
+      id: `patient-${Date.now()}`,
+      role: "patient",
+      text: question
+    };
+    const loadingMessageId = `assistant-loading-${Date.now()}`;
     setMessages((items) => [
       ...items,
-      { id: `patient-${Date.now()}`, role: "patient", text: question },
-      { id: `assistant-${Date.now()}`, role: "assistant", text: respond(question) }
+      patientMessage,
+      { id: loadingMessageId, role: "assistant", text: "Thinking..." }
     ]);
+
+    try {
+      const reply = await askPatientAssistant({
+        patient,
+        assignments: assistantAssignments,
+        results,
+        message: question,
+        experienceMode
+      });
+      const answer = reply.message?.trim() || respond(question);
+      setMessages((items) =>
+        items.map((message) =>
+          message.id === loadingMessageId
+            ? { id: `assistant-${Date.now()}`, role: "assistant", text: answer }
+            : message
+        )
+      );
+    } catch {
+      setMessages((items) =>
+        items.map((message) =>
+          message.id === loadingMessageId
+            ? { id: `assistant-${Date.now()}`, role: "assistant", text: respond(question) }
+            : message
+        )
+      );
+    } finally {
+      setAssistantBusy(false);
+    }
   };
 
   return (
@@ -2621,10 +2678,15 @@ function PatientAssistant({
           ))}
         </div>
         <form className="assistant-form" onSubmit={submit}>
-          <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Ask about games, reps, notes, or scores" />
-          <button type="submit" className="primary-button">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Ask about games, reps, notes, or scores"
+            disabled={assistantBusy}
+          />
+          <button type="submit" className="primary-button" disabled={assistantBusy}>
             <Send size={18} />
-            Send
+            {assistantBusy ? "Sending" : "Send"}
           </button>
         </form>
       </article>

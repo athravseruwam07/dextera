@@ -6,7 +6,9 @@ const config = {
   corsOrigin: process.env.CORS_ORIGIN || "*",
   storageMode: process.env.STORAGE_MODE || "mock",
   nodeEnv: process.env.NODE_ENV || "development",
-  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET || ""
+  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET || "",
+  geminiApiKey: process.env.GEMINI_API_KEY || "",
+  geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash"
 };
 
 module.exports = { config };

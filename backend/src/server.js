@@ -4,6 +4,7 @@ const express = require("express");
 const { config } = require("./config");
 const { createRealtimeServer } = require("./realtime");
 const { fakeGestureEvent } = require("./fakeGesture");
+const { createPatientAssistantReply } = require("./gemini");
 const { requireAuth } = require("./middleware/auth");
 const {
   gestureEventSchema,
@@ -111,6 +112,26 @@ function createApp(realtime) {
       const cal = await repo.getCalibration(req.params.patientId);
       if (!cal) return res.status(404).json({ error: "No calibration found" });
       res.json(cal);
+    })
+  );
+
+  // Patient portal assistant can run in demo/patient flows without a therapist JWT.
+  // The Gemini key stays server-side; the route only uses context supplied by the app.
+  app.post(
+    "/api/ai/patient-chat",
+    asyncHandler(async (req, res) => {
+      const input = req.body || {};
+      const message = String(input.message || "").trim();
+      if (!message) return res.status(400).json({ error: "Message is required" });
+
+      const reply = await createPatientAssistantReply({
+        patient: input.patient || {},
+        assignments: Array.isArray(input.assignments) ? input.assignments : [],
+        results: Array.isArray(input.results) ? input.results : [],
+        message,
+        experienceMode: input.experienceMode
+      });
+      res.json(reply);
     })
   );
 
@@ -343,17 +364,6 @@ function createApp(realtime) {
       const summary = await repo.createProgressSummary(input.patientId);
       if (!summary) return res.status(404).json({ error: "Patient not found" });
       res.json(summary);
-    })
-  );
-
-  app.post(
-    "/api/ai/patient-chat",
-    asyncHandler(async (req, res) => {
-      res.json({
-        message:
-          "Demo assistant stub: patient coaching chat is not enabled for this hackathon build. Clinician review recommended.",
-        received: req.body || {}
-      });
     })
   );
 

@@ -117,6 +117,8 @@ Live Monitor exercise options come from `exerciseTemplates` in `src/data/mockDat
 
 `src/lib/backend.ts` owns all HTTP and WebSocket calls. It maps backend JSON shapes to the frontend's internal types, normalising missing fields and deriving `accuracy`, `holdMs`, and `smoothness` if absent.
 
+Patient Assistant calls `POST /api/ai/patient-chat` through `askPatientAssistant()` in `src/lib/backend.ts`. The backend route uses `backend/src/gemini.js` with `@google/genai` when `GEMINI_API_KEY` is set, defaults to `GEMINI_MODEL=gemini-2.5-flash`, falls back across known Gemini Flash models on 404s, and uses deterministic Dextera answers for exact plan facts like notes, reps, assigned games, known game instructions, scores, and safety-sensitive questions.
+
 `src/lib/gesture.ts` contains pure gesture utilities (classification, accuracy scoring, patient summaries). This is the only tested file (`gesture.test.ts` via Vitest).
 
 Therapist Settings are opened from the top-right gear dropdown, not the sidebar or a dedicated Settings page. Accounts and System Status open focused popups; Sign out remains in the dropdown.
