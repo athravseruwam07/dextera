@@ -163,6 +163,10 @@ The current checkout only includes `frontend/src/vr/`, the legacy embedded dashb
 | `DATABASE_URL` | `postgres://gloving:gloving@localhost:55432/gloving` | |
 | `STORAGE_MODE` | `mock` | `mock` or `postgres` |
 | `CORS_ORIGIN` | `*` | |
+| `SUPABASE_URL` | | Required for authenticated API routes in Postgres/prod mode |
+| `SUPABASE_SERVICE_ROLE_KEY` | | Preferred backend token verification key; never expose to frontend |
+| `SUPABASE_ANON_KEY` | | Backend fallback for Supabase Auth token introspection if no service role key is set |
+| `SUPABASE_JWT_SECRET` | | Optional legacy HS256 JWT verification secret; newer asymmetric Supabase tokens use `SUPABASE_URL` + API key instead |
 
 Frontend reads `VITE_API_BASE_URL` (default `http://127.0.0.1:4000`) and `VITE_WS_URL` from env.
 
