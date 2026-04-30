@@ -18,6 +18,14 @@ export interface ExerciseAssignment {
   patientId: string;
   exerciseId: string;
   assignedAt: string;
+  status: "assigned" | "completed";
+  completedAt?: string | null;
+  result?: {
+    repsCompleted: number;
+    targetReps: number;
+    accuracy: number;
+    timeTakenSeconds: number;
+  } | null;
 }
 
 export const fingerExercises: FingerExercise[] = [

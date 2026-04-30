@@ -822,10 +822,29 @@ async function createExerciseAssignment(payload) {
     id: payload.id || `exercise-assignment-${randomUUID().slice(0, 8)}`,
     patientId: payload.patientId,
     exerciseId: payload.exerciseId,
-    assignedAt
+    assignedAt,
+    status: payload.status || "assigned",
+    completedAt: payload.completedAt || null,
+    result: payload.result || null
   };
   exerciseAssignments.unshift(stored);
   return { ...stored };
+}
+
+async function updateExerciseAssignment(id, payload) {
+  const assignment = exerciseAssignments.find((item) => item.id === id);
+  if (!assignment) return null;
+  if (payload.status) assignment.status = payload.status;
+  if ("completedAt" in payload) {
+    assignment.completedAt =
+      payload.completedAt instanceof Date ? payload.completedAt.toISOString() : payload.completedAt;
+  } else if (payload.status === "completed") {
+    assignment.completedAt = new Date().toISOString();
+  } else if (payload.status === "assigned") {
+    assignment.completedAt = null;
+  }
+  if ("result" in payload) assignment.result = payload.result;
+  return { ...assignment };
 }
 
 async function deleteExerciseAssignment(id) {
@@ -941,6 +960,7 @@ module.exports = {
   deleteAssignment,
   listPatientExerciseAssignments,
   createExerciseAssignment,
+  updateExerciseAssignment,
   deleteExerciseAssignment,
   listPatientAppointments,
   listAppointments,

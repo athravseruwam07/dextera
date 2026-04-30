@@ -144,7 +144,7 @@ async function getAuthHeader(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${data.session.access_token}` };
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 2500): Promise<T> {
+export async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 10000): Promise<T> {
   const { signal, clear } = timeoutSignal(timeoutMs);
   const authHeader = await getAuthHeader();
   try {
@@ -574,9 +574,24 @@ export async function fetchExerciseAssignments(patientId: string): Promise<Exerc
   return apiFetch<ExerciseAssignment[]>(`/api/patients/${patientId}/exercise-assignments`);
 }
 
-export async function createExerciseAssignment(payload: Omit<ExerciseAssignment, "id" | "assignedAt"> & { assignedAt?: string }) {
+export async function createExerciseAssignment(payload: {
+  patientId: string;
+  exerciseId: string;
+  assignedAt?: string;
+  status?: ExerciseAssignment["status"];
+}) {
   return apiFetch<ExerciseAssignment>("/api/exercise-assignments", {
     method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateExerciseAssignment(
+  id: string,
+  payload: Partial<Pick<ExerciseAssignment, "status" | "completedAt" | "result">>
+) {
+  return apiFetch<ExerciseAssignment>(`/api/exercise-assignments/${encodeURIComponent(id)}`, {
+    method: "PATCH",
     body: JSON.stringify(payload)
   });
 }

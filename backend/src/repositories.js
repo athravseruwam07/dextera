@@ -10,9 +10,15 @@ async function ensureExerciseAssignmentsTable() {
       patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
       exercise_id TEXT NOT NULL,
       assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      status TEXT NOT NULL DEFAULT 'assigned',
+      completed_at TIMESTAMPTZ,
+      result JSONB NOT NULL DEFAULT '{}'::jsonb,
       UNIQUE (patient_id, exercise_id)
     )
   `);
+  await query("ALTER TABLE exercise_assignments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'assigned'");
+  await query("ALTER TABLE exercise_assignments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ");
+  await query("ALTER TABLE exercise_assignments ADD COLUMN IF NOT EXISTS result JSONB NOT NULL DEFAULT '{}'::jsonb");
   await query(`
     CREATE INDEX IF NOT EXISTS exercise_assignments_patient_idx
     ON exercise_assignments(patient_id, assigned_at DESC)
@@ -55,7 +61,10 @@ function mapExerciseAssignment(row) {
     id: row.id,
     patientId: row.patient_id,
     exerciseId: row.exercise_id,
-    assignedAt: row.assigned_at
+    assignedAt: row.assigned_at,
+    status: row.status || "assigned",
+    completedAt: row.completed_at,
+    result: row.result || null
   };
 }
 
@@ -398,7 +407,7 @@ async function createExerciseAssignment(payload) {
       INSERT INTO exercise_assignments (id, patient_id, exercise_id, assigned_at)
       VALUES ($1, $2, $3, $4)
       ON CONFLICT (patient_id, exercise_id)
-      DO UPDATE SET assigned_at = EXCLUDED.assigned_at
+      DO UPDATE SET assigned_at = EXCLUDED.assigned_at, status = 'assigned', completed_at = NULL, result = '{}'::jsonb
       RETURNING *
     `,
     [
@@ -409,6 +418,33 @@ async function createExerciseAssignment(payload) {
     ]
   );
   return mapExerciseAssignment(result.rows[0]);
+}
+
+async function updateExerciseAssignment(id, payload) {
+  await ensureExerciseAssignmentsTable();
+  const result = await query(
+    `
+      UPDATE exercise_assignments
+      SET
+        status = COALESCE($2, status),
+        completed_at = CASE
+          WHEN $3::timestamptz IS NOT NULL THEN $3::timestamptz
+          WHEN $2 = 'completed' THEN now()
+          WHEN $2 = 'assigned' THEN NULL
+          ELSE completed_at
+        END,
+        result = COALESCE($4::jsonb, result)
+      WHERE id = $1
+      RETURNING *
+    `,
+    [
+      id,
+      payload.status || null,
+      payload.completedAt ? (payload.completedAt instanceof Date ? payload.completedAt.toISOString() : payload.completedAt) : null,
+      payload.result ? JSON.stringify(payload.result) : null
+    ]
+  );
+  return result.rows[0] ? mapExerciseAssignment(result.rows[0]) : null;
 }
 
 async function deleteExerciseAssignment(id) {
@@ -500,6 +536,7 @@ module.exports = {
   createExerciseResult,
   listPatientExerciseAssignments,
   createExerciseAssignment,
+  updateExerciseAssignment,
   deleteExerciseAssignment,
   getPatientProgress,
   createOrGetTherapist

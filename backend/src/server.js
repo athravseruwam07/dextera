@@ -15,6 +15,7 @@ const {
   exerciseResultSchema,
   assignmentSchema,
   exerciseAssignmentSchema,
+  updateExerciseAssignmentSchema,
   appointmentSchema,
   progressSummarySchema,
   updatePatientNotesSchema
@@ -337,6 +338,19 @@ function createApp(realtime) {
       const input = validate(exerciseAssignmentSchema, req.body);
       if (!repo.createExerciseAssignment) return res.status(501).json({ error: "Exercise assignments are not supported" });
       res.status(201).json(await repo.createExerciseAssignment(input));
+    })
+  );
+
+  app.patch(
+    "/api/exercise-assignments/:id",
+    asyncHandler(async (req, res) => {
+      const input = validate(updateExerciseAssignmentSchema, req.body || {});
+      if (!repo.updateExerciseAssignment) {
+        return res.status(501).json({ error: "Exercise assignment update is not supported" });
+      }
+      const assignment = await repo.updateExerciseAssignment(req.params.id, input);
+      if (!assignment) return res.status(404).json({ error: "Exercise assignment not found" });
+      res.json(assignment);
     })
   );
 

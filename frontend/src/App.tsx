@@ -56,7 +56,8 @@ import {
   requestFakeGesture,
   savePatientNotes,
   startBackendSession,
-  syncTherapistProfile
+  syncTherapistProfile,
+  updateExerciseAssignment
 } from "./lib/backend";
 import {
   detectWeakestFinger,
@@ -116,6 +117,27 @@ const productionDoctorAccount = {
   email: "doctor@dextera.app",
   password: "DexteraDoctor2026!"
 };
+
+function mergeExerciseAssignments(...lists: ExerciseAssignment[][]): ExerciseAssignment[] {
+  const byKey = new Map<string, ExerciseAssignment>();
+  for (const assignment of lists.flat()) {
+    byKey.set(`${assignment.patientId}:${assignment.exerciseId}`, assignment);
+  }
+  return Array.from(byKey.values()).sort((a, b) => b.assignedAt.localeCompare(a.assignedAt));
+}
+
+function markExerciseAssignmentCompleted(
+  assignment: ExerciseAssignment,
+  result: NonNullable<ExerciseAssignment["result"]>,
+  completedAt = new Date().toISOString()
+): ExerciseAssignment {
+  return {
+    ...assignment,
+    status: "completed",
+    completedAt,
+    result
+  };
+}
 
 const localPatientSessionKey = "dextera.localPatientSession.v1";
 
@@ -2523,6 +2545,7 @@ export default function App() {
     document.documentElement.dataset.theme = "light";
     try {
       localStorage.removeItem("dextera.theme");
+      localStorage.removeItem("dextera.exerciseAssignments.v1");
     } catch {
       // Ignore storage failures; the visual theme still applies for this session.
     }
@@ -2547,6 +2570,7 @@ export default function App() {
       ? { assignmentId: initialRoute.exerciseAssignmentId, step: initialRoute.exerciseStep ?? "detail" }
       : null
   );
+
   const [currentEvent, setCurrentEvent] = useState<GestureEvent>(() =>
     createGestureEvent("patient-loading", "open")
   );
@@ -2715,7 +2739,9 @@ export default function App() {
           );
           if (!cancelled) setAssignments(assignmentLists.flat());
           const exerciseAssignmentLists = await Promise.all(
-            backendPatients.map((patient) => fetchExerciseAssignments(patient.id).catch(() => []))
+            backendPatients.map((patient) =>
+              fetchExerciseAssignments(patient.id).catch(() => [])
+            )
           );
           if (!cancelled) setExerciseAssignments(exerciseAssignmentLists.flat());
         }
@@ -2854,28 +2880,30 @@ export default function App() {
   };
 
   const handleAssignExercise = async (patientId: string, exerciseId: string) => {
+    const optimistic: ExerciseAssignment = {
+      id: `exercise-assignment-${Date.now()}`,
+      patientId,
+      exerciseId,
+      assignedAt: new Date().toISOString(),
+      status: "assigned",
+      completedAt: null,
+      result: null
+    };
+    setExerciseAssignments((items) =>
+      mergeExerciseAssignments([optimistic], items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId))
+    );
     if (backendConnected) {
       try {
-        const created = await createExerciseAssignment({ patientId, exerciseId });
-        setExerciseAssignments((items) => [
-          created,
-          ...items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId)
-        ]);
+        const created = await createExerciseAssignment({ patientId, exerciseId, assignedAt: optimistic.assignedAt });
+        setExerciseAssignments((items) =>
+          mergeExerciseAssignments([created], items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId))
+        );
         await refreshPatientSideData(patientId);
         return;
       } catch {
         setBackendConnected(false);
       }
     }
-    setExerciseAssignments((items) => [
-      {
-        id: `exercise-assignment-${Date.now()}`,
-        patientId,
-        exerciseId,
-        assignedAt: new Date().toISOString()
-      },
-      ...items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId)
-    ]);
   };
 
   const handleUnassignExercise = async (assignmentId: string) => {
@@ -2891,6 +2919,24 @@ export default function App() {
       }
     }
     setExerciseAssignments((items) => items.filter((item) => item.id !== assignmentId));
+  };
+
+  const handleExerciseCompleted = async (assignment: ExerciseAssignment, result: NonNullable<ExerciseAssignment["result"]>) => {
+    const completed = markExerciseAssignmentCompleted(assignment, result);
+    setExerciseAssignments((items) => mergeExerciseAssignments([completed], items.filter((item) => item.id !== assignment.id)));
+
+    if (backendConnected) {
+      try {
+        const saved = await updateExerciseAssignment(assignment.id, {
+          status: "completed",
+          completedAt: completed.completedAt,
+          result
+        });
+        setExerciseAssignments((items) => mergeExerciseAssignments([saved], items.filter((item) => item.id !== assignment.id)));
+      } catch {
+        setBackendConnected(false);
+      }
+    }
   };
 
   const handleCreateAppointment = async (appointment: Omit<Appointment, "id" | "createdAt">) => {
@@ -3099,7 +3145,10 @@ export default function App() {
     setAssignments(nextAssignments);
     setAppointments(nextAppointments);
     setAlerts(nextAlerts);
-    setExerciseAssignments(nextExerciseAssignments);
+    setExerciseAssignments((items) => [
+      ...items.filter((assignment) => assignment.patientId !== patient.id),
+      ...nextExerciseAssignments
+    ]);
   };
 
   useEffect(() => {
@@ -3301,6 +3350,14 @@ export default function App() {
         onNavigateScreen={openPatientPortalScreen}
         exerciseRoute={patientExerciseRoute}
         onNavigateExercise={openPatientExerciseRoute}
+        onExerciseCompleted={(assignment, result) =>
+          void handleExerciseCompleted(assignment, {
+            repsCompleted: result.repsCompleted,
+            targetReps: result.targetReps,
+            accuracy: result.accuracy,
+            timeTakenSeconds: result.timeTakenSeconds
+          })
+        }
         onLogout={handleLogout}
       />
     );

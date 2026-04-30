@@ -363,6 +363,7 @@ export function PatientExperience({
   onNavigateScreen,
   exerciseRoute,
   onNavigateExercise,
+  onExerciseCompleted,
   experienceMode = "patient"
 }: {
   patient: Patient;
@@ -381,6 +382,7 @@ export function PatientExperience({
   onNavigateScreen?: (screen: PatientScreen) => void;
   exerciseRoute?: { assignmentId: string; step: PatientExerciseRouteStep } | null;
   onNavigateExercise?: (assignmentId: string, step: PatientExerciseRouteStep) => void;
+  onExerciseCompleted?: (assignment: ExerciseAssignment, result: ExercisePlayResult) => void;
 }) {
   const [route, setRoute] = useState<PatientRoute>({ step: "dashboard" });
   const [results, setResults] = useState<SessionResult[]>(() => loadSessionResults(patient.id));
@@ -607,38 +609,34 @@ export function PatientExperience({
     if (route.step === "exercise-detail" || route.step === "exercise-play" || route.step === "exercise-results") {
       if (!selectedExerciseAssignment) {
         return (
-          <section className="page-stack patient-dashboard">
-            <div className="patient-hero">
-              <div>
-                <span className="eyebrow">Your exercises</span>
-                <h2>No exercises assigned</h2>
-                <p>Your care team has not assigned any finger exercises yet.</p>
+          <section className="page-stack patient-exercise-stage">
+            <BackButton onBack={() => goToPatientScreen("home")} label="Plan" />
+            <article className="exercise-stage-shell" style={{ alignItems: "center", textAlign: "center" }}>
+              <header className="exercise-stage-hero" style={{ justifyContent: "center" }}>
+                <div>
+                  <span className="eyebrow">Exercise not available</span>
+                  <h2>This exercise can&apos;t be loaded</h2>
+                  <p>The clinician-assigned drill for this link isn&apos;t in your current plan. Return to your plan to pick another exercise.</p>
+                </div>
+              </header>
+              <div className="exercise-stage-actions" style={{ justifyContent: "center" }}>
+                <button type="button" className="primary-button" onClick={() => goToPatientScreen("home")}>
+                  Back to Plan
+                </button>
               </div>
-            </div>
+            </article>
           </section>
         );
       }
 
-      if (route.step === "exercise-detail") {
-        return (
-          <PatientExerciseDetail
-            assignment={selectedExerciseAssignment}
-            onBack={() => goToPatientScreen("home")}
-            onStart={() => {
-              setExerciseResult(undefined);
-              goToExercise(selectedExerciseAssignment.id, "play");
-            }}
-          />
-        );
-      }
-
-      if (route.step === "exercise-play") {
+      if (route.step === "exercise-detail" || route.step === "exercise-play") {
         return (
           <PatientExerciseSession
             assignment={selectedExerciseAssignment}
-            onBack={() => goToExercise(selectedExerciseAssignment.id, "detail")}
+            onBack={() => goToPatientScreen("home")}
             onComplete={(result) => {
               setExerciseResult(result);
+              onExerciseCompleted?.(selectedExerciseAssignment, result);
               goToExercise(selectedExerciseAssignment.id, "results");
             }}
           />
@@ -795,7 +793,7 @@ export function PatientExperience({
           results={results}
           experienceMode={experienceMode}
           onOpenAssignment={(assignmentId) => beginAssignment(assignmentId)}
-          onOpenExercise={(exerciseAssignmentId) => goToExercise(exerciseAssignmentId, "detail")}
+          onOpenExercise={(exerciseAssignmentId) => goToExercise(exerciseAssignmentId, "play")}
         />
     );
   })();
@@ -1124,7 +1122,9 @@ function PatientDashboard({
                   <article className="assignment-card exercise-plan-card" key={assignment.id}>
                     <div className="assignment-card-top">
                       <div className="assignment-icon"><Hand size={20} /></div>
-                      <span className="status-pill status-review">Due</span>
+                      <span className={`status-pill ${assignment.status === "completed" ? "status-active" : "status-review"}`}>
+                        {assignment.status === "completed" ? "Completed" : "Due"}
+                      </span>
                     </div>
                     <h3>{exercise.name}</h3>
                     <p>{exercise.description}</p>
@@ -1135,7 +1135,7 @@ function PatientDashboard({
                     </div>
                     <div className="assignment-actions">
                       <button type="button" className="secondary-button" onClick={() => onOpenExercise(assignment.id)}>
-                        View Details
+                        {assignment.status === "completed" ? "Review" : "View Details"}
                       </button>
                     </div>
                   </article>
@@ -1320,48 +1320,83 @@ function PatientExerciseSession({
     window.setTimeout(() => input.emitGesture("open"), 260);
   };
 
+  const ringDashTotal = 339.292;
+  const ringDashOffset = ringDashTotal - (ringDashTotal * progress) / 100;
+  const targetPressedAll = exercise.fingers.every((finger) => input.fingerBends[finger] >= 55);
+  const otherRelaxedAll = nonTargetFingers.every((finger) => input.fingerBends[finger] <= 52);
+  const phaseLabel = pressedRef.current ? "Hold" : targetPressedAll && otherRelaxedAll ? "Release" : "Bend";
+
   return (
-    <section className="page-stack patient-exercise-play">
-      <BackButton onBack={onBack} label="Exercise Detail" />
-      <article className="surface patient-exercise-session">
-        <div className="section-title">
+    <section className="page-stack patient-exercise-stage">
+      <BackButton onBack={onBack} label="Plan" />
+      <article className="exercise-stage-shell">
+        <header className="exercise-stage-hero">
           <div>
             <span className="eyebrow">Exercise in progress</span>
             <h2>{exercise.name}</h2>
+            <p>{exercise.fingers.map((finger) => fingerLabels[finger]).join(" + ")} · {difficultyLabel(exercise.difficulty)}</p>
           </div>
-          <span className="status-pill status-active">{reps}/{exercise.reps} reps</span>
-        </div>
+          <div className="exercise-stage-conn">
+            <span className={`status-dot ${input.rawConnected ? "is-live" : "is-demo"}`} />
+            {input.rawConnected ? "Glove connected" : "Demo stream"}
+          </div>
+        </header>
 
-        <div className="exercise-progress-track" aria-label={`${progress}% complete`}>
-          <span style={{ width: `${progress}%` }} />
-        </div>
-
-        <div className="exercise-live-grid">
-          <div className="exercise-live-target">
-            <strong>{feedback}</strong>
-            <p>{exercise.fingers.map((finger) => fingerLabels[finger]).join(" + ")}</p>
-            <div className="exercise-live-stat-row">
-              <span>Target bend {targetAverage}%</span>
-              <span>Other fingers {nonTargetAverage}%</span>
-              <span>{input.rawConnected ? "Glove connected" : "Demo stream"}</span>
+        <div className="exercise-stage-grid">
+          <div className="exercise-stage-ring">
+            <svg viewBox="0 0 120 120" width="240" height="240" aria-hidden>
+              <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="10" />
+              <circle
+                cx="60" cy="60" r="54" fill="none" stroke="url(#exGradient)" strokeWidth="10"
+                strokeLinecap="round" strokeDasharray={ringDashTotal} strokeDashoffset={ringDashOffset}
+                transform="rotate(-90 60 60)" style={{ transition: "stroke-dashoffset 220ms ease" }}
+              />
+              <defs>
+                <linearGradient id="exGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#22d3ee" />
+                  <stop offset="100%" stopColor="#6366f1" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div className="exercise-stage-ring-label">
+              <strong>{reps}<small>/{exercise.reps}</small></strong>
+              <span>reps</span>
             </div>
           </div>
-          <div className="exercise-finger-meter-list">
-            {fingerNames.map((finger) => (
-              <div className={targetSet.has(finger) ? "exercise-finger-meter is-target" : "exercise-finger-meter"} key={finger}>
-                <span>{fingerLabels[finger]}</span>
-                <div>
-                  <i style={{ width: `${Math.max(0, Math.min(100, input.fingerBends[finger]))}%` }} />
-                </div>
-                <strong>{Math.round(input.fingerBends[finger])}%</strong>
-              </div>
-            ))}
+
+          <div className="exercise-stage-prompt">
+            <span className="exercise-stage-phase">{phaseLabel}</span>
+            <strong>{feedback}</strong>
+            <div className="exercise-stage-targets">
+              {fingerNames.map((finger) => {
+                const pct = Math.max(0, Math.min(100, input.fingerBends[finger]));
+                const isTarget = targetSet.has(finger);
+                return (
+                  <div className={`exercise-finger-column${isTarget ? " is-target" : ""}`} key={finger}>
+                    <div className="exercise-finger-track">
+                      {isTarget ? <span className="exercise-finger-zone" /> : null}
+                      <span className="exercise-finger-fill" style={{ height: `${pct}%` }} />
+                    </div>
+                    <span className="exercise-finger-label">{fingerLabels[finger]}</span>
+                    <strong>{Math.round(pct)}%</strong>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="exercise-stage-stats">
+              <span>Target {targetAverage}%</span>
+              <span>Other {nonTargetAverage}%</span>
+              <span>Attempts {attempts}</span>
+            </div>
           </div>
         </div>
 
-        <div className="exercise-session-actions">
+        <div className="exercise-stage-actions">
           <button type="button" className="secondary-button" onClick={demoRep}>
             Demo Rep
+          </button>
+          <button type="button" className="ghost-button" onClick={onBack}>
+            Exit
           </button>
         </div>
       </article>
