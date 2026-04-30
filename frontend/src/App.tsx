@@ -64,6 +64,7 @@ import {
   getAverageAccuracy,
   getDifficultyRecommendation as getLocalDifficultyRecommendation,
   getAccuracyTrend,
+  demoGraphSessions,
   getImprovementPercent,
   getLatestAccuracy,
   getPainFatigueTrend,
@@ -519,6 +520,120 @@ const demoAlerts: Alert[] = [
     resolved: false
   }
 ];
+
+function isBobBill(patient: Pick<Patient, "name">) {
+  return patient.name.trim().toLowerCase() === "bob bill";
+}
+
+function bobBillAssignments(patientId: string): Assignment[] {
+  const createdAt = new Date().toISOString();
+  return [
+    {
+      id: `${patientId}-ball-pickup`,
+      patientId,
+      doctorId: demoDoctor.id,
+      gameId: "ball-pickup",
+      gameName: "Ball Pickup",
+      difficulty: "medium",
+      reps: 10,
+      rounds: null,
+      frequency: "Daily",
+      dueDate: futureDate(1),
+      targetSkill: "Grip release control",
+      notes: "Focus on full open-hand release before speed.",
+      status: "assigned",
+      createdAt,
+      updatedAt: createdAt
+    },
+    {
+      id: `${patientId}-finger-tap-piano`,
+      patientId,
+      doctorId: demoDoctor.id,
+      gameId: "finger-tap-piano",
+      gameName: "Finger Tap Piano",
+      difficulty: "easy",
+      reps: null,
+      rounds: 3,
+      frequency: "4x/week",
+      dueDate: futureDate(2),
+      targetSkill: "Index and middle finger isolation",
+      notes: "Keep taps controlled; rest if fatigue rises.",
+      status: "assigned",
+      createdAt,
+      updatedAt: createdAt
+    }
+  ];
+}
+
+function bobBillAppointment(patientId: string): Appointment {
+  return {
+    id: `${patientId}-upcoming-progress`,
+    patientId,
+    doctorId: demoDoctor.id,
+    date: futureDate(4),
+    time: "11:30",
+    type: "Progress check-in",
+    notes: "Review adherence, finger isolation, and release timing.",
+    status: "scheduled",
+    createdAt: new Date().toISOString()
+  };
+}
+
+function bobBillAlerts(patientId: string): Alert[] {
+  const createdAt = new Date().toISOString();
+  return [
+    {
+      id: `${patientId}-alert-adherence`,
+      patientId,
+      type: "low_adherence",
+      severity: "medium",
+      title: "Adherence improving",
+      message: "Bob completed 5 of the last 7 scheduled home sessions; keep monitoring consistency.",
+      createdAt,
+      resolved: false
+    },
+    {
+      id: `${patientId}-alert-ring`,
+      patientId,
+      type: "weak_finger",
+      severity: "medium",
+      title: "Ring finger lag",
+      message: "Ring finger extension is trending lower than index and middle during recent reps.",
+      createdAt,
+      resolved: false
+    },
+    {
+      id: `${patientId}-alert-fatigue`,
+      patientId,
+      type: "fatigue_increase",
+      severity: "low",
+      title: "Mild fatigue increase",
+      message: "Fatigue rose by 1 point after the latest longer session; no pain spike reported.",
+      createdAt,
+      resolved: false
+    }
+  ];
+}
+
+function bobBillDifficultyRecommendation(patientId: string): DifficultyRecommendation {
+  return {
+    patientId,
+    recommendation: "Keep current difficulty",
+    reason: "Accuracy is improving, but mild fatigue and ring-finger lag suggest holding difficulty steady for one more week.",
+    label: "Maintain medium plan"
+  };
+}
+
+function withBobBillDemoPatientData(patient: Patient): Patient {
+  if (!isBobBill(patient)) return patient;
+  const sessions = demoGraphSessions(patient.id);
+  return {
+    ...patient,
+    status: "active",
+    baselineMobility: Math.max(patient.baselineMobility, 54),
+    sessions: patient.sessions.length >= sessions.length ? patient.sessions : sessions
+  };
+}
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en", {
@@ -2519,7 +2634,6 @@ function AppShell({
 	            <p>{topbarSubtitle}</p>
 	          </div>
 	          <div className="topbar-actions">
-	            {view === "patient" || rehabGameViews.includes(view) ? <GestureBadge gesture={currentEvent.gesture} /> : null}
             <div className="settings-menu" ref={settingsMenuRef}>
               <button
                 className="icon-button settings-menu-trigger"
@@ -2738,6 +2852,48 @@ export default function App() {
     );
   }, [patients]);
 
+  useEffect(() => {
+    const bob = patients.find(isBobBill);
+    if (!bob) return;
+
+    const hydratedBob = withBobBillDemoPatientData(bob);
+    if (bob.sessions.length !== hydratedBob.sessions.length || bob.status !== hydratedBob.status || bob.baselineMobility !== hydratedBob.baselineMobility) {
+      setPatients((items) =>
+        items.map((patient) =>
+          patient.id === bob.id
+            ? withBobBillDemoPatientData(patient)
+            : patient
+        )
+      );
+    }
+
+    setAssignments((items) => {
+      const next = bobBillAssignments(bob.id);
+      const existing = items.filter((assignment) => assignment.patientId === bob.id);
+      if (existing.length === next.length && next.every((assignment) => existing.some((item) => item.id === assignment.id))) return items;
+      return [...items.filter((assignment) => assignment.patientId !== bob.id), ...next];
+    });
+
+    setAppointments((items) => {
+      const next = bobBillAppointment(bob.id);
+      if (items.some((appointment) => appointment.id === next.id)) return items;
+      return [...items, next];
+    });
+
+    setAlerts((items) => {
+      const next = bobBillAlerts(bob.id);
+      if (next.every((alert) => items.some((item) => item.id === alert.id))) return items;
+      return [...items.filter((alert) => alert.patientId !== bob.id), ...next];
+    });
+
+    setDifficultyRecommendations((items) => {
+      const next = bobBillDifficultyRecommendation(bob.id);
+      return items[bob.id]?.label === next.label && items[bob.id]?.reason === next.reason
+        ? items
+        : { ...items, [bob.id]: next };
+    });
+  }, [patients]);
+
   const clinicianAssignedGames = useMemo(
     () => selectedPatient ? doctorAssignmentsToPatientCare(patientAssignments(selectedPatient.id, assignments)) : [],
     [assignments, selectedPatient]
@@ -2833,7 +2989,7 @@ export default function App() {
         const backendPatients = (await fetchBackendPatientSummaries()).filter((patient) => !isDemoPatient(patient));
         if (cancelled) return;
 
-        setPatients(backendPatients);
+        setPatients(backendPatients.map(withBobBillDemoPatientData));
         setSelectedPatientId((current) =>
           backendPatients.some((patient) => patient.id === current) ? current : backendPatients[0]?.id ?? ""
         );
@@ -2870,7 +3026,7 @@ export default function App() {
         void Promise.all(
           backendPatients.map((patient) => fetchBackendPatient(patient.id).catch(() => patient))
         ).then((hydratedPatients) => {
-          if (!cancelled) setPatients(hydratedPatients);
+          if (!cancelled) setPatients(hydratedPatients.map(withBobBillDemoPatientData));
         });
       } catch {
         if (!cancelled) {
@@ -3291,10 +3447,11 @@ export default function App() {
       }
     }
 
+    patient = withBobBillDemoPatientData(patient);
     setPatients([patient]);
     setSelectedPatientId(patient.id);
     setCurrentEvent(createGestureEvent(patient.id, "open"));
-    const [nextAssignments, nextAppointments, nextAlerts, nextExerciseAssignments] =
+    let [nextAssignments, nextAppointments, nextAlerts, nextExerciseAssignments] =
       patientBackendConnected || supabase
         ? await Promise.all([
             fetchAssignments(patient.id).catch(() => []),
@@ -3303,6 +3460,15 @@ export default function App() {
             fetchExerciseAssignments(patient.id).catch(() => [])
           ])
         : [[], [], [], []];
+    if (isBobBill(patient)) {
+      nextAssignments = bobBillAssignments(patient.id);
+      nextAppointments = [bobBillAppointment(patient.id)];
+      nextAlerts = bobBillAlerts(patient.id);
+      setDifficultyRecommendations((items) => ({
+        ...items,
+        [patient.id]: bobBillDifficultyRecommendation(patient.id)
+      }));
+    }
     setAssignments(nextAssignments);
     setAppointments(nextAppointments);
     setAlerts(nextAlerts);
