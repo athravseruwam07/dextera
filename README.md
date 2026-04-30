@@ -4,11 +4,7 @@ Dextera is a smart-glove rehabilitation platform for people rebuilding hand mobi
 
 The goal is simple: make home hand therapy more engaging for patients and more observable for clinicians.
 
-> Add glove photo here:
->
-> `docs/glove-photo.jpg`
->
-> Recommended image: top-down photo of the glove with the ESP32, flex sensors, wiring, and USB/power connection visible.
+![dextera glove](docs/glove-photo.jpg)
 
 ## What Dextera Does
 
