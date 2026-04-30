@@ -88,7 +88,28 @@ CREATE TABLE IF NOT EXISTS exercise_assignments (
   patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   exercise_id TEXT NOT NULL,
   assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'assigned',
+  completed_at TIMESTAMPTZ,
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
   UNIQUE (patient_id, exercise_id)
+);
+
+CREATE TABLE IF NOT EXISTS assignments (
+  id TEXT PRIMARY KEY,
+  patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id TEXT NOT NULL DEFAULT 'doctor-1',
+  game_id TEXT NOT NULL,
+  game_name TEXT NOT NULL,
+  difficulty TEXT NOT NULL DEFAULT 'easy',
+  reps INTEGER,
+  rounds INTEGER,
+  frequency TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  target_skill TEXT NOT NULL,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'assigned',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS gesture_events_patient_recorded_idx ON gesture_events(patient_id, recorded_at DESC);
@@ -96,5 +117,7 @@ CREATE INDEX IF NOT EXISTS gesture_events_session_recorded_idx ON gesture_events
 CREATE INDEX IF NOT EXISTS sessions_patient_started_idx ON sessions(patient_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS sessions_active_patient_idx ON sessions(patient_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS exercise_assignments_patient_idx ON exercise_assignments(patient_id, assigned_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS exercise_assignments_patient_exercise_uidx ON exercise_assignments(patient_id, exercise_id);
+CREATE INDEX IF NOT EXISTS assignments_patient_idx ON assignments(patient_id, due_date ASC);
 
 ALTER TABLE therapists ADD COLUMN IF NOT EXISTS auth_user_id UUID UNIQUE;

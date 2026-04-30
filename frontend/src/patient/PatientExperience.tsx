@@ -37,6 +37,7 @@ import {
   YAxis
 } from "recharts";
 import { fingerNames, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
+import { demoGraphSessions } from "../lib/doctorAnalytics";
 import { askPatientAssistant } from "../lib/backend";
 import type {
   CalibrationData,
@@ -79,11 +80,12 @@ import {
 } from "./patientData";
 import { fingerExercises, type ExerciseAssignment, type FingerExercise } from "../data/exercises";
 
-export type PatientScreen = "home" | "calendar" | "progress" | "assistant";
+export type PatientScreen = "home" | "games" | "calendar" | "progress" | "assistant";
 export type PatientExerciseRouteStep = "detail" | "play" | "results";
 
 type PatientRoute =
   | { step: "dashboard" }
+  | { step: "games" }
   | { step: "detail"; assignmentId: string }
   | { step: "tutorial"; assignmentId: string }
   | { step: "calibration"; assignmentId: string }
@@ -115,6 +117,8 @@ type ExercisePlayResult = {
   timeTakenSeconds: number;
   completedAt: string;
 };
+
+type ExerciseResultSummary = Pick<ExercisePlayResult, "repsCompleted" | "targetReps" | "accuracy" | "timeTakenSeconds">;
 
 const fingerLabels: Record<FingerName, string> = {
   thumb: "Thumb",
@@ -249,9 +253,48 @@ function recommendedCalibrationTarget(
 
 type CalibrationTarget =
   | { id: string; kind: "step"; step: keyof CalibrationData["steps"]; label: string }
-  | { id: string; kind: "finger"; finger: FingerName; label: string };
+  | { id: string; kind: "finger"; finger: FingerName; label: string }
+  | { id: "carrom-flick"; kind: "carrom-flick"; label: string };
 
 type CalibrationRunPhase = "idle" | "prepare" | "hold" | "captured" | "retry" | "complete";
+type CarromFlickFinger = "index" | "middle";
+type CarromFlickCalibrationState = {
+  finger: CarromFlickFinger | null;
+  speeds: number[];
+  count: number;
+  bends: Record<CarromFlickFinger, { bent: boolean; startedAt: number; peakBend: number }>;
+  message: string;
+};
+
+const CARROM_FLICK_REQUIRED_COUNT = 3;
+
+function initialCarromFlickCalibrationState(): CarromFlickCalibrationState {
+  return {
+    finger: null,
+    speeds: [],
+    count: 0,
+    bends: {
+      index: { bent: false, startedAt: 0, peakBend: 0 },
+      middle: { bent: false, startedAt: 0, peakBend: 0 }
+    },
+    message: "Bend and snap your index or middle finger straight 3 times."
+  };
+}
+
+function buildCarromFlickProfile(state: CarromFlickCalibrationState): CalibrationData["carromFlickProfile"] | undefined {
+  if (!state.finger || state.speeds.length < CARROM_FLICK_REQUIRED_COUNT) return undefined;
+  const speeds = [...state.speeds].sort((a, b) => a - b);
+  const avg = state.speeds.reduce((sum, speed) => sum + speed, 0) / state.speeds.length;
+  return {
+    finger: state.finger,
+    comfortableFlickSpeed: Math.round(avg),
+    minFlickSpeed: Math.max(45, Math.round(speeds[0] * 0.65)),
+    maxFlickSpeed: Math.max(Math.round(speeds[speeds.length - 1] * 1.25), Math.round(avg * 1.15)),
+    flickCount: state.speeds.length,
+    sampleCount: state.speeds.length,
+    capturedAt: new Date().toISOString()
+  };
+}
 
 function calibrationGestureMeta(step: keyof CalibrationData["steps"]) {
   return CALIBRATION_GESTURES.find((gesture) => gesture.key === step);
@@ -371,7 +414,7 @@ export function PatientExperience({
   currentEvent: GestureEvent;
   backendConnected: boolean;
   onSessionSaved: (session: RehabSession) => void;
-  /** When set (including []), replaces mock demo assignments — use clinician-assigned games for this patient only. */
+  /** Clinician-assigned games for this patient. */
   assignedGames?: PatientCareAssignment[];
   assignedExercises?: ExerciseAssignment[];
   /** When set (including []), replaces mock demo appointments. */
@@ -385,6 +428,7 @@ export function PatientExperience({
   onExerciseCompleted?: (assignment: ExerciseAssignment, result: ExercisePlayResult) => void;
 }) {
   const [route, setRoute] = useState<PatientRoute>({ step: "dashboard" });
+  const accessibilityMode = false;
   const [results, setResults] = useState<SessionResult[]>(() => loadSessionResults(patient.id));
   const [calibration, setCalibration] = useState<CalibrationData | undefined>();
   const [preCheck, setPreCheck] = useState<CheckIn | undefined>();
@@ -393,14 +437,22 @@ export function PatientExperience({
   const [exerciseResult, setExerciseResult] = useState<ExercisePlayResult | undefined>();
   const [sessionStartedAt, setSessionStartedAt] = useState("");
   const [sessionEndedAt, setSessionEndedAt] = useState("");
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "pending-sync" | "error">("idle");
   const [saveMessage, setSaveMessage] = useState("");
+  const [lastSaveResult, setLastSaveResult] = useState<SessionResult | undefined>();
+  const [gameEntrySource, setGameEntrySource] = useState<"plan" | "games">("plan");
 
   const assignments = useMemo(() => {
     if (experienceMode === "doctor-library") return createDoctorGameLibraryAssignments();
-    if (assignedGames !== undefined) return assignedGames;
+    if (assignedGames !== undefined) return assignedGames.filter((assignment) => assignment.patientId === patient.id);
     return createPatientAssignments(patient.id);
   }, [experienceMode, assignedGames, patient.id]);
+
+  const gameCatalogAssignments = useMemo(() => {
+    if (experienceMode === "doctor-library") return assignments;
+    const assignedByGame = new Map(assignments.map((assignment) => [assignment.gameId, assignment]));
+    return createPatientAssignments(patient.id).map((catalogAssignment) => assignedByGame.get(catalogAssignment.gameId) ?? catalogAssignment);
+  }, [assignments, experienceMode, patient.id]);
 
   const appointments = useMemo(() => {
     if (experienceMode === "doctor-library") return [];
@@ -410,11 +462,12 @@ export function PatientExperience({
 
   const exercisePlan = useMemo<PatientExerciseAssignment[]>(() => {
     if (experienceMode === "doctor-library") return [];
-    return (assignedExercises ?? []).flatMap((assignment) => {
+    const visibleAssignments = (assignedExercises ?? []).filter((assignment) => assignment.patientId === patient.id);
+    return visibleAssignments.flatMap((assignment) => {
       const exercise = fingerExercises.find((item) => item.id === assignment.exerciseId);
       return exercise ? [{ ...assignment, exercise }] : [];
     });
-  }, [assignedExercises, experienceMode]);
+  }, [assignedExercises, experienceMode, patient.id]);
 
   useEffect(() => {
     setResults(loadSessionResults(patient.id));
@@ -431,12 +484,22 @@ export function PatientExperience({
       return;
     }
     setRoute({
-      step: screen === "calendar" ? "calendar" : screen === "assistant" ? "assistant" : screen === "progress" ? "progress" : "dashboard"
+      step:
+        screen === "games"
+          ? "games"
+          : screen === "calendar"
+            ? "calendar"
+            : screen === "assistant"
+              ? "assistant"
+              : screen === "progress"
+                ? "progress"
+                : "dashboard"
     });
   }, [exerciseRoute, patient.id, screen]);
 
   const goToPatientScreen = (nextScreen: PatientScreen) => {
     onNavigateScreen?.(nextScreen);
+    setGameEntrySource(nextScreen === "games" ? "games" : "plan");
     setRoute({ step: nextScreen === "home" ? "dashboard" : nextScreen });
   };
 
@@ -448,36 +511,55 @@ export function PatientExperience({
     });
   };
 
+  const openExerciseDetail = (assignmentId: string) => {
+    setExerciseResult(undefined);
+    goToExercise(assignmentId, "detail");
+  };
+
   const selectedAssignment: PatientCareAssignment | undefined =
-    assignments.length === 0
+    gameCatalogAssignments.length === 0
       ? undefined
       : "assignmentId" in route
-        ? assignments.find((assignment) => assignment.id === route.assignmentId) ?? assignments[0]
-        : assignments[0];
+        ? gameCatalogAssignments.find((assignment) => assignment.id === route.assignmentId)
+        : gameCatalogAssignments[0];
   const selectedExerciseAssignment: PatientExerciseAssignment | undefined =
     exercisePlan.length === 0
       ? undefined
       : "exerciseAssignmentId" in route
-        ? exercisePlan.find((assignment) => assignment.id === route.exerciseAssignmentId) ?? exercisePlan[0]
+        ? exercisePlan.find((assignment) => assignment.id === route.exerciseAssignmentId)
         : exercisePlan[0];
   const selectedGameManifest = selectedAssignment ? manifestForGame(selectedAssignment.gameId) : null;
   const openFistOnlyInput = selectedAssignment?.gameId === "ball-pickup";
   const gloveMode = selectedGameManifest?.gloveMode ?? "default";
 
   const routeStep = route.step;
-  const routeAnchor = "assignmentId" in route ? `${route.step}:${route.assignmentId}` : route.step;
+  const routeIsGameFlow =
+    route.step === "detail" ||
+    route.step === "tutorial" ||
+    route.step === "calibration" ||
+    route.step === "pre-check" ||
+    route.step === "game" ||
+    route.step === "post-check" ||
+    route.step === "results";
+  const routeAnchor =
+    "assignmentId" in route
+      ? `${route.step}:${route.assignmentId}`
+      : "exerciseAssignmentId" in route
+        ? `${route.step}:${route.exerciseAssignmentId}`
+        : route.step;
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [routeAnchor]);
 
   useEffect(() => {
-    if (assignments.length > 0) return;
-    if (routeStep === "dashboard" || routeStep === "calendar" || routeStep === "progress" || routeStep === "assistant") return;
+    if (gameCatalogAssignments.length > 0) return;
+    if (routeStep === "dashboard" || routeStep === "games" || routeStep === "calendar" || routeStep === "progress" || routeStep === "assistant") return;
     setRoute({ step: "dashboard" });
-  }, [assignments.length, routeStep]);
+  }, [gameCatalogAssignments.length, routeStep]);
 
-  const beginAssignment = (assignmentId: string, step: PatientRoute["step"] = "detail") => {
+  const beginAssignment = (assignmentId: string, step: PatientRoute["step"] = "detail", source: "plan" | "games" = "plan") => {
+    setGameEntrySource(source);
     if (step === "detail") setRoute({ step: "detail", assignmentId });
     if (step === "tutorial") setRoute({ step: "tutorial", assignmentId });
     if (step === "calibration") setRoute({ step: "calibration", assignmentId });
@@ -493,6 +575,7 @@ export function PatientExperience({
     setSessionEndedAt("");
     setSaveState("idle");
     setSaveMessage("");
+    setLastSaveResult(undefined);
   };
 
   const startQuickTestGame = (assignment: PatientCareAssignment) => {
@@ -528,6 +611,17 @@ export function PatientExperience({
       },
       fingerTaps,
       fingerTapProfiles: buildFingerTapProfiles(open, fist, fingerTaps),
+      carromFlickProfile: assignment.gameId === "carrom-flick"
+        ? {
+            finger: "index",
+            comfortableFlickSpeed: 180,
+            minFlickSpeed: 80,
+            maxFlickSpeed: 320,
+            flickCount: 3,
+            sampleCount: 12,
+            capturedAt: new Date().toISOString()
+          }
+        : undefined,
       thresholds: {
         openAverage: averageBend(open),
         fistAverage: averageBend(fist),
@@ -542,33 +636,43 @@ export function PatientExperience({
   const saveCurrentResult = async () => {
     if (!selectedAssignment || !gameResult || !preCheck || !postCheck) return;
     setSaveState("saving");
-    const weakestFinger = gameResult.weakestFinger ?? (gameResult.events.length ? weakestFingerFromEvents(gameResult.events) : undefined);
-    const result: SessionResult = {
-      id: `patient-session-${Date.now()}`,
-      patientId: patient.id,
-      assignmentId: selectedAssignment.id,
-      gameId: selectedAssignment.gameId,
-      gameName: selectedAssignment.name,
-      startedAt: sessionStartedAt || new Date(Date.now() - gameResult.timeTakenSeconds * 1000).toISOString(),
-      endedAt: sessionEndedAt || new Date().toISOString(),
-      repsCompleted: gameResult.repsCompleted,
-      successfulReps: gameResult.successfulReps,
-      failedAttempts: gameResult.failedAttempts,
-      accuracy: gameResult.accuracy,
-      timeTakenSeconds: gameResult.timeTakenSeconds,
-      gameMetrics: gameResult.gameMetrics,
-      inputMode: calibration?.inputMode ?? "glove",
-      weakestFinger,
-      painBefore: preCheck,
-      painAfter: postCheck,
-      calibration,
-      events: gameResult.events,
-      encouragement: encouragementFor({ ...gameResult, weakestFinger })
-    };
+    const result: SessionResult =
+      lastSaveResult ??
+      (() => {
+        const weakestFinger = gameResult.weakestFinger ?? (gameResult.events.length ? weakestFingerFromEvents(gameResult.events) : undefined);
+        return {
+          id: `patient-session-${Date.now()}`,
+          patientId: patient.id,
+          assignmentId: selectedAssignment.id,
+          gameId: selectedAssignment.gameId,
+          gameName: selectedAssignment.name,
+          startedAt: sessionStartedAt || new Date(Date.now() - gameResult.timeTakenSeconds * 1000).toISOString(),
+          endedAt: sessionEndedAt || new Date().toISOString(),
+          repsCompleted: gameResult.repsCompleted,
+          successfulReps: gameResult.successfulReps,
+          failedAttempts: gameResult.failedAttempts,
+          accuracy: gameResult.accuracy,
+          timeTakenSeconds: gameResult.timeTakenSeconds,
+          gameMetrics: gameResult.gameMetrics,
+          inputMode: calibration?.inputMode ?? "glove",
+          weakestFinger,
+          painBefore: preCheck,
+          painAfter: postCheck,
+          calibration,
+          events: gameResult.events,
+          encouragement: encouragementFor({ ...gameResult, weakestFinger })
+        };
+      })();
 
     try {
       if (experienceMode === "doctor-library") {
-        const savedLocal = saveSessionResultLocal(result);
+        const localOnly: SessionResult = {
+          ...result,
+          syncStatus: "local-only",
+          syncMessage: "Preview result saved in this browser only."
+        };
+        const savedLocal = saveSessionResultLocal(localOnly);
+        setLastSaveResult(savedLocal);
         setResults((items) => [savedLocal, ...items.filter((item) => item.id !== savedLocal.id)]);
         setSaveState("saved");
         setSaveMessage(
@@ -576,10 +680,20 @@ export function PatientExperience({
         );
       } else {
         const saved = await savePatientSessionResult(result, selectedAssignment, backendConnected);
-        setResults((items) => [saved.result, ...items.filter((item) => item.id !== saved.result.id)]);
-        onSessionSaved(sessionResultToRehabSession(saved.result));
-        setSaveState("saved");
-        setSaveMessage(saved.backendSaved ? "Saved to backend and local demo history." : "Saved locally for the patient demo.");
+        setLastSaveResult(saved.result);
+        setResults((items) => [saved.result, ...items.filter((item) => item.id !== saved.result.id && item.id !== result.id)]);
+        if (saved.backendSaved) {
+          onSessionSaved(sessionResultToRehabSession(saved.result));
+          setSaveState("saved");
+          setSaveMessage("Saved to the clinician dashboard and local patient history.");
+        } else {
+          setSaveState("pending-sync");
+          setSaveMessage(
+            saved.errorMessage
+              ? `${saved.result.syncMessage} (${saved.errorMessage})`
+              : saved.result.syncMessage ?? "Saved locally, but not yet synced to the clinician dashboard."
+          );
+        }
       }
     } catch {
       setSaveState("error");
@@ -605,6 +719,15 @@ export function PatientExperience({
     if (route.step === "progress") {
       return <PatientRecoveryProgress patient={patient} assignments={assignments} results={results} />;
     }
+    if (route.step === "games") {
+      return (
+        <PatientRehabGamesCatalog
+          assignments={gameCatalogAssignments}
+          results={results}
+          onOpenAssignment={(assignmentId) => beginAssignment(assignmentId, "detail", "games")}
+        />
+      );
+    }
 
     if (route.step === "exercise-detail" || route.step === "exercise-play" || route.step === "exercise-results") {
       if (!selectedExerciseAssignment) {
@@ -616,7 +739,7 @@ export function PatientExperience({
                 <div>
                   <span className="eyebrow">Exercise not available</span>
                   <h2>This exercise can&apos;t be loaded</h2>
-                  <p>The clinician-assigned drill for this link isn&apos;t in your current plan. Return to your plan to pick another exercise.</p>
+                  <p>The clinician-assigned drill for this link isn&apos;t in your current plan. Return to Plan to pick another exercise.</p>
                 </div>
               </header>
               <div className="exercise-stage-actions" style={{ justifyContent: "center" }}>
@@ -629,7 +752,21 @@ export function PatientExperience({
         );
       }
 
-      if (route.step === "exercise-detail" || route.step === "exercise-play") {
+      if (route.step === "exercise-detail") {
+        return (
+          <PatientExerciseDetail
+            assignment={selectedExerciseAssignment}
+            result={selectedExerciseAssignment.result ?? undefined}
+            onBack={() => goToPatientScreen("home")}
+            onStart={() => {
+              setExerciseResult(undefined);
+              goToExercise(selectedExerciseAssignment.id, "play");
+            }}
+          />
+        );
+      }
+
+      if (route.step === "exercise-play") {
         return (
           <PatientExerciseSession
             assignment={selectedExerciseAssignment}
@@ -646,7 +783,7 @@ export function PatientExperience({
       return (
         <PatientExerciseResults
           assignment={selectedExerciseAssignment}
-          result={exerciseResult}
+          result={exerciseResult ?? selectedExerciseAssignment.result ?? undefined}
           onReplay={() => {
             setExerciseResult(undefined);
             goToExercise(selectedExerciseAssignment.id, "play");
@@ -665,23 +802,36 @@ export function PatientExperience({
       route.step === "post-check" ||
       route.step === "results";
 
-    if (stepNeedsAssignment && (!selectedAssignment || assignments.length === 0)) {
+    if (stepNeedsAssignment && !selectedAssignment) {
+      const missingAssignedGame = "assignmentId" in route && gameCatalogAssignments.length > 0;
       return (
         <section className="page-stack patient-dashboard">
           <div className="patient-hero">
             <div>
-              <span className="eyebrow">Your games</span>
-              <h2>No exercises assigned</h2>
+              <span className="eyebrow">{missingAssignedGame ? "Game not available" : "Your games"}</span>
+              <h2>{missingAssignedGame ? "This game can't be loaded" : "No exercises assigned"}</h2>
               <p>
-                Your care team has not placed any rehab games on your plan yet — or they may all be marked complete. Check
-                back after your clinician assigns new activities.
+                {missingAssignedGame
+                  ? "This game link is not available right now. Return to Rehab Games to pick another game."
+                  : "The rehab game catalog is not available right now. Check back after the app reloads."}
               </p>
             </div>
           </div>
           <EmptyState
-            title="Nothing on your plan yet"
-            detail="Only games your clinician assigns to you will show up here. Ask your clinic to add exercises to your care plan."
+            title={missingAssignedGame ? "Game removed from plan" : "Nothing on your plan yet"}
+            detail={
+              missingAssignedGame
+                ? "Use the Rehab Games page to continue with an available game."
+                : "The full game catalog should appear here for every patient."
+            }
           />
+          {missingAssignedGame ? (
+            <div className="assignment-actions" style={{ justifyContent: "center" }}>
+              <button type="button" className="primary-button" onClick={() => goToPatientScreen("games")}>
+                Back to Rehab Games
+              </button>
+            </div>
+          ) : null}
         </section>
       );
     }
@@ -692,7 +842,7 @@ export function PatientExperience({
       return (
         <AssignmentDetail
           assignment={a}
-          onBack={() => setRoute({ step: "dashboard" })}
+          onBack={() => setRoute({ step: gameEntrySource === "games" ? "games" : "dashboard" })}
           onCalibration={() => {
             resetSessionState();
             setRoute({ step: "calibration", assignmentId: a.id });
@@ -717,6 +867,7 @@ export function PatientExperience({
       return (
         <CalibrationScreen
           assignment={a}
+          accessibilityMode={accessibilityMode}
           onBack={() => setRoute({ step: "detail", assignmentId: a.id })}
           onComplete={(value) => {
             setCalibration(value);
@@ -745,6 +896,8 @@ export function PatientExperience({
       return (
         <PatientGame
           assignment={a}
+          accessibilityMode={accessibilityMode}
+          calibration={calibration}
           onComplete={(value) => {
             setGameResult(value);
             setSessionEndedAt(new Date().toISOString());
@@ -779,7 +932,7 @@ export function PatientExperience({
           saveState={saveState}
           saveMessage={saveMessage}
           onSave={saveCurrentResult}
-          onDashboard={() => setRoute({ step: "dashboard" })}
+          onDashboard={() => setRoute({ step: gameEntrySource === "games" ? "games" : "dashboard" })}
         />
       );
     }
@@ -789,11 +942,12 @@ export function PatientExperience({
           patient={patient}
           assignments={assignments}
           exerciseAssignments={exercisePlan}
+          catalogCount={gameCatalogAssignments.length}
           appointments={appointments}
           results={results}
           experienceMode={experienceMode}
-          onOpenAssignment={(assignmentId) => beginAssignment(assignmentId)}
-          onOpenExercise={(exerciseAssignmentId) => goToExercise(exerciseAssignmentId, "play")}
+          onOpenAssignment={(assignmentId) => beginAssignment(assignmentId, "detail", "plan")}
+          onOpenExercise={openExerciseDetail}
         />
     );
   })();
@@ -813,8 +967,9 @@ export function PatientExperience({
         ) : (
           <PatientPortalShell
             patient={patient}
-            activeRoute={route.step}
+            activeRoute={gameEntrySource === "games" && routeIsGameFlow ? "games" : route.step}
             onHome={() => goToPatientScreen("home")}
+            onGames={() => goToPatientScreen("games")}
             onCalendar={() => goToPatientScreen("calendar")}
             onProgress={() => goToPatientScreen("progress")}
             onAssistant={() => goToPatientScreen("assistant")}
@@ -832,6 +987,7 @@ function PatientPortalShell({
   patient,
   activeRoute,
   onHome,
+  onGames,
   onCalendar,
   onProgress,
   onAssistant,
@@ -841,6 +997,7 @@ function PatientPortalShell({
   patient: Patient;
   activeRoute: PatientRoute["step"];
   onHome: () => void;
+  onGames: () => void;
   onCalendar: () => void;
   onProgress: () => void;
   onAssistant: () => void;
@@ -856,7 +1013,9 @@ function PatientPortalShell({
         ? "progress"
         : activeRoute === "assistant"
           ? "assistant"
-          : "plan";
+          : activeRoute === "games"
+            ? "games"
+            : "plan";
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -894,6 +1053,10 @@ function PatientPortalShell({
           <button type="button" className={activeNav === "plan" ? "active" : ""} onClick={onHome}>
             <ClipboardList size={19} />
             Plan
+          </button>
+          <button type="button" className={activeNav === "games" ? "active" : ""} onClick={onGames}>
+            <Sparkles size={19} />
+            Rehab Games
           </button>
           <button type="button" className={activeNav === "calendar" ? "active" : ""} onClick={onCalendar}>
             <CalendarDays size={19} />
@@ -950,6 +1113,7 @@ function PatientDashboard({
   patient,
   assignments,
   exerciseAssignments,
+  catalogCount,
   appointments,
   results,
   experienceMode,
@@ -959,6 +1123,7 @@ function PatientDashboard({
   patient: Patient;
   assignments: PatientCareAssignment[];
   exerciseAssignments: PatientExerciseAssignment[];
+  catalogCount: number;
   appointments: PatientCareAppointment[];
   results: SessionResult[];
   experienceMode: "patient" | "doctor-library";
@@ -1028,7 +1193,7 @@ function PatientDashboard({
           <span className="eyebrow">Patient Home</span>
           <h2>{`Hello, ${patient.name}`}</h2>
           <p>
-            Choose an assigned game. We will guide you through setup, check-in, play, and results.
+            Follow your assigned plan here, or open Rehab Games from the sidebar to play any game.
           </p>
         </div>
         {assignments[0] && (
@@ -1070,10 +1235,10 @@ function PatientDashboard({
         <article className="surface">
           <div className="section-title">
             <h3>Today&apos;s Rehab Plan</h3>
-            <span>{assignments.length} Games</span>
+            <span>{assignments.length} Assigned · {catalogCount} in Rehab Games</span>
           </div>
           {assignments.length === 0 ? (
-            <EmptyState title="No assignments today" detail="Your clinician has not assigned exercises for today." />
+            <EmptyState title="No assignments today" detail="Your clinician has not assigned games for today. Use Rehab Games to practice any available game." />
           ) : (
             <div className="assignment-grid">
               {assignments.map((assignment) => {
@@ -1167,16 +1332,80 @@ function PatientDashboard({
   );
 }
 
+function PatientRehabGamesCatalog({
+  assignments,
+  results,
+  onOpenAssignment
+}: {
+  assignments: PatientCareAssignment[];
+  results: SessionResult[];
+  onOpenAssignment: (assignmentId: string) => void;
+}) {
+  return (
+    <section className="page-stack rehab-games-doctor-page patient-rehab-games-page" aria-labelledby="patient-rg-page-title">
+      <div className="rg-library-shell">
+        <header className="rg-library-head">
+          <h2 id="patient-rg-page-title">Rehab Games</h2>
+          <p>Pick any game in the Dextera catalog. Your clinician&apos;s assigned settings are used when available.</p>
+        </header>
+
+        {assignments.length === 0 ? (
+          <EmptyState title="No games available" detail="The rehab game catalog could not be loaded." />
+        ) : (
+          <div className="rg-catalog-grid">
+            {assignments.map((assignment) => {
+              const gid = assignment.gameId as GameId;
+              const completed = results.some((result) => result.assignmentId === assignment.id);
+              return (
+                <article className={`rg-game-card rg-game-card--theme-${gid}`} key={assignment.id}>
+                  <div className="rg-game-card__viz" aria-hidden>
+                    <RehabGameCatalogArt gameId={gid} />
+                  </div>
+                  <div className="rg-game-card__body">
+                    <div className="assignment-card-top">
+                      <h3 className="rg-game-card__title">{assignment.name}</h3>
+                      <span className={`status-pill ${completed ? "status-active" : "status-review"}`}>
+                        {completed ? "Played" : "Available"}
+                      </span>
+                    </div>
+                    <p className="rg-game-desc">{rehabGameCatalogTagline(gid)}</p>
+                    <div className="rg-game-meta" aria-label={`${assignment.name} details`}>
+                      <span>{assignment.config.targetReps} reps</span>
+                      <span>{difficultyLabel(assignment.config.difficulty)}</span>
+                      <span>{assignment.config.frequency.toLowerCase()}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="primary-button rg-game-card__link"
+                    onClick={() => onOpenAssignment(assignment.id)}
+                  >
+                    <Play size={16} aria-hidden />
+                    View Details
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function PatientExerciseDetail({
   assignment,
+  result,
   onBack,
   onStart
 }: {
   assignment: PatientExerciseAssignment;
+  result?: ExerciseResultSummary | null;
   onBack: () => void;
   onStart: () => void;
 }) {
   const exercise = assignment.exercise;
+  const completed = assignment.status === "completed" || Boolean(result);
   const setupSteps = [
     { label: "Review", Icon: ClipboardList },
     { label: "Practice", Icon: Hand },
@@ -1205,7 +1434,7 @@ function PatientExerciseDetail({
             <div className="pregame-hero-actions">
               <button type="button" className="primary-button pregame-hero-cta" onClick={onStart}>
                 <Play size={18} />
-                Start Exercise
+                {completed ? "Repeat Exercise" : "Start Exercise"}
               </button>
             </div>
           </div>
@@ -1242,6 +1471,20 @@ function PatientExerciseDetail({
             <li>Release back to open before starting the next rep.</li>
           </ol>
         </div>
+        <aside className="pregame-quick-section patient-exercise-summary-card">
+          <h3>{completed ? "Last result" : "What counts"}</h3>
+          {result ? (
+            <div className="exercise-detail-result-grid">
+              <span><strong>{result.repsCompleted}/{result.targetReps}</strong> reps</span>
+              <span><strong>{result.accuracy}%</strong> accuracy</span>
+              <span><strong>{result.timeTakenSeconds}s</strong> time</span>
+            </div>
+          ) : (
+            <p>
+              A rep counts when the target fingers bend past the goal while the other fingers stay relaxed, then return open.
+            </p>
+          )}
+        </aside>
       </section>
     </section>
   );
@@ -1411,7 +1654,7 @@ function PatientExerciseResults({
   onDashboard
 }: {
   assignment: PatientExerciseAssignment;
-  result?: ExercisePlayResult;
+  result?: ExerciseResultSummary | null;
   onReplay: () => void;
   onDashboard: () => void;
 }) {
@@ -1617,11 +1860,13 @@ function TutorialSteps({ assignment, compact = false, pregame = false }: { assig
 
 function CalibrationScreen({
   assignment,
+  accessibilityMode,
   onBack,
   onComplete,
   onSkip
 }: {
   assignment: PatientCareAssignment;
+  accessibilityMode: boolean;
   onBack: () => void;
   onComplete: (calibration: CalibrationData) => void;
   onSkip: () => void;
@@ -1636,6 +1881,7 @@ function CalibrationScreen({
   const [qualityByTarget, setQualityByTarget] = useState<Record<string, FingerTapCaptureQuality>>({});
   const [activeQuality, setActiveQuality] = useState<FingerTapCaptureQuality | null>(null);
   const [feedbackTarget, setFeedbackTarget] = useState<CalibrationTarget | null>(null);
+  const [carromFlickState, setCarromFlickState] = useState<CarromFlickCalibrationState>(() => initialCarromFlickCalibrationState());
   const activeSamplesRef = useRef<CalibrationSample[]>([]);
   const sampleKeysRef = useRef<Set<string>>(new Set());
   const isBallPickup = assignment.gameId === "ball-pickup";
@@ -1661,13 +1907,24 @@ function CalibrationScreen({
             finger,
             label: `${fingerLabels[finger]} tap`
           }))
+        : []),
+      ...(assignment.gameId === "carrom-flick"
+        ? [{
+            id: "carrom-flick" as const,
+            kind: "carrom-flick" as const,
+            label: "Finger flick"
+          }]
         : [])
     ];
   }, [assignment.gameId, isBallPickup, isBubblePop, isFingerTap]);
   const requiredSteps = calibrationTargets.length;
   const hasFreshRaw = input.rawConnected && Date.now() - input.lastRawAt <= 1800 && input.rawSamples.length > 0;
   const ready = calibrationTargets.every((target) =>
-    target.kind === "step" ? Boolean(steps[target.step]) : Boolean(fingerTaps[target.finger])
+    target.kind === "step"
+      ? Boolean(steps[target.step])
+      : target.kind === "finger"
+        ? Boolean(fingerTaps[target.finger])
+        : carromFlickState.count >= CARROM_FLICK_REQUIRED_COUNT
   );
 
   const activeTarget = calibrationTargets[activeIndex] ?? null;
@@ -1682,7 +1939,11 @@ function CalibrationScreen({
           : activeTarget.step === "point"
             ? "Point with your index finger and hold."
             : "Pinch thumb and index lightly and hold."
-      : `Tap and hold ${activeTarget.label.replace(" tap", "")}.`
+      : activeTarget.kind === "finger"
+        ? `Tap and hold ${activeTarget.label.replace(" tap", "")}.`
+        : carromFlickState.finger
+          ? `Use your ${carromFlickState.finger} finger. Bend it, then snap it straight ${CARROM_FLICK_REQUIRED_COUNT - carromFlickState.count} more time${CARROM_FLICK_REQUIRED_COUNT - carromFlickState.count === 1 ? "" : "s"}.`
+          : "Bend and snap either your index or middle finger straight. The first clear flick chooses your flick finger."
     : ready
       ? "Calibration complete."
       : "Start calibration when the glove is ready.";
@@ -1692,6 +1953,7 @@ function CalibrationScreen({
       setSteps((items) => ({ ...items, [target.step]: values }));
       return;
     }
+    if (target.kind === "carrom-flick") return;
     setFingerTaps((items) => ({ ...items, [target.finger]: values }));
   };
 
@@ -1704,6 +1966,7 @@ function CalibrationScreen({
 
   useEffect(() => {
     if (calibrationPhase !== "hold" || !activeTarget) return undefined;
+    if (activeTarget.kind === "carrom-flick") return undefined;
     if (!hasFreshRaw) {
       resetActiveHold();
       return undefined;
@@ -1771,12 +2034,112 @@ function CalibrationScreen({
     return () => window.clearInterval(tick);
   }, [activeIndex, activeTarget, calibrationPhase, calibrationTargets.length, fingerTaps, hasFreshRaw, holdStartedAt, input.lastRawAt, input.rawValues, steps.fist, steps.open]);
 
+  useEffect(() => {
+    if (calibrationPhase !== "hold" || activeTarget?.kind !== "carrom-flick" || !hasFreshRaw) return;
+    const now = performance.now();
+    const bentThreshold = accessibilityMode ? 44 : 50;
+    const straightThreshold = accessibilityMode ? 36 : 30;
+    const minExtensionSpeed = accessibilityMode ? 55 : 75;
+    const candidateFingers: CarromFlickFinger[] = carromFlickState.finger ? [carromFlickState.finger] : ["index", "middle"];
+
+    for (const finger of candidateFingers) {
+      const bend = input.fingerBends[finger];
+      const state = carromFlickState.bends[finger];
+
+      if (!state.bent) {
+        if (bend >= bentThreshold) {
+          setCarromFlickState((current) => ({
+            ...current,
+            bends: {
+              ...current.bends,
+              [finger]: { bent: true, startedAt: now, peakBend: bend }
+            },
+            message: `Good. Snap your ${finger} finger straight.`
+          }));
+          return;
+        }
+        continue;
+      }
+
+      const nextPeak = Math.max(state.peakBend, bend);
+      if (bend > straightThreshold) {
+        if (nextPeak !== state.peakBend) {
+          setCarromFlickState((current) => ({
+            ...current,
+            bends: {
+              ...current.bends,
+              [finger]: { ...current.bends[finger], peakBend: nextPeak }
+            }
+          }));
+        }
+        continue;
+      }
+
+      const elapsed = Math.max(now - state.startedAt, 1);
+      const extensionSpeed = (nextPeak - bend) / (elapsed / 1000);
+      if (extensionSpeed < minExtensionSpeed) {
+        setCarromFlickState((current) => ({
+          ...current,
+          bends: {
+            ...current.bends,
+            [finger]: { bent: false, startedAt: 0, peakBend: 0 }
+          },
+          message: `That ${finger} flick was too slow. Bend, then snap straight faster.`
+        }));
+        return;
+      }
+
+      setCarromFlickState((current) => {
+        const speeds = [...current.speeds, extensionSpeed].slice(0, CARROM_FLICK_REQUIRED_COUNT);
+        const count = speeds.length;
+        const selectedFinger = current.finger ?? finger;
+        const next: CarromFlickCalibrationState = {
+          ...current,
+          finger: selectedFinger,
+          speeds,
+          count,
+          bends: {
+            index: { bent: false, startedAt: 0, peakBend: 0 },
+            middle: { bent: false, startedAt: 0, peakBend: 0 }
+          },
+          message:
+            count >= CARROM_FLICK_REQUIRED_COUNT
+              ? `${fingerLabels[selectedFinger]} flick calibration complete.`
+              : `${fingerLabels[selectedFinger]} flick ${count}/${CARROM_FLICK_REQUIRED_COUNT} captured. Do ${CARROM_FLICK_REQUIRED_COUNT - count} more.`
+        };
+
+        if (count >= CARROM_FLICK_REQUIRED_COUNT) {
+          const quality: FingerTapCaptureQuality = {
+            ok: true,
+            status: "stable",
+            message: `${fingerLabels[selectedFinger]} flick speed profile captured.`,
+            sampleCount: speeds.length,
+            signal: Math.round(speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length),
+            stability: 100
+          };
+          setActiveQuality(quality);
+          setQualityByTarget((items) => ({ ...items, [activeTarget.id]: quality }));
+          setFeedbackTarget(activeTarget);
+          setHoldProgressMs(CALIBRATION_HOLD_MS);
+          window.setTimeout(() => {
+            setActiveIndex((index) => index + 1);
+            setCalibrationPhase("complete");
+          }, 0);
+        }
+
+        return next;
+      });
+      return;
+    }
+  }, [accessibilityMode, activeTarget, calibrationPhase, carromFlickState, hasFreshRaw, input.fingerBends]);
+
   const startCalibration = () => {
     setSteps({});
     setFingerTaps({});
     setQualityByTarget({});
     setActiveQuality(null);
     setFeedbackTarget(null);
+    setCarromFlickState(initialCarromFlickCalibrationState());
     setActiveIndex(0);
     setHoldStartedAt(null);
     setHoldProgressMs(0);
@@ -1802,6 +2165,7 @@ function CalibrationScreen({
 
   const finish = () => {
     const fingerTapProfiles = buildFingerTapProfiles(steps.open, steps.fist, fingerTaps);
+    const carromFlickProfile = assignment.gameId === "carrom-flick" ? buildCarromFlickProfile(carromFlickState) : undefined;
     const calibration: CalibrationData = {
       id: `calibration-${Date.now()}`,
       patientId: assignment.patientId,
@@ -1811,6 +2175,7 @@ function CalibrationScreen({
       steps,
       fingerTaps,
       fingerTapProfiles,
+      carromFlickProfile,
       thresholds: {
         openAverage: averageBend(steps.open),
         fistAverage: averageBend(steps.fist),
@@ -1824,11 +2189,20 @@ function CalibrationScreen({
   };
 
   const capturedCount = calibrationTargets.reduce(
-    (sum, target) => sum + (target.kind === "step" ? Number(Boolean(steps[target.step])) : Number(Boolean(fingerTaps[target.finger]))),
+    (sum, target) =>
+      sum + (
+        target.kind === "step"
+          ? Number(Boolean(steps[target.step]))
+          : target.kind === "finger"
+            ? Number(Boolean(fingerTaps[target.finger]))
+            : Number(carromFlickState.count >= CARROM_FLICK_REQUIRED_COUNT)
+      ),
     0
   );
   const progressPct = Math.round((capturedCount / requiredSteps) * 100);
-  const holdPct = Math.round((holdProgressMs / CALIBRATION_HOLD_MS) * 100);
+  const holdPct = activeTarget?.kind === "carrom-flick"
+    ? Math.round((carromFlickState.count / CARROM_FLICK_REQUIRED_COUNT) * 100)
+    : Math.round((holdProgressMs / CALIBRATION_HOLD_MS) * 100);
   const remainingHoldSeconds = Math.ceil(Math.max(CALIBRATION_HOLD_MS - holdProgressMs, 0) / 1000);
   const modalTitle =
     calibrationPhase === "complete"
@@ -1846,10 +2220,13 @@ function CalibrationScreen({
         : calibrationPhase === "retry"
           ? activeQuality?.message ?? "The glove did not get a stable capture. Relax, then try the same prompt again."
           : calibrationPhase === "hold"
-            ? activeInstruction
+            ? activeTarget?.kind === "carrom-flick" ? carromFlickState.message : activeInstruction
             : modalTarget
               ? `Next: ${activeInstruction}`
               : "Start calibration when the glove is ready.";
+  const visibleInstruction = activeTarget?.kind === "carrom-flick" && calibrationPhase === "hold"
+    ? carromFlickState.message
+    : activeInstruction;
 
   return (
     <section className="page-stack patient-flow-page patient-calibration-page">
@@ -1864,9 +2241,9 @@ function CalibrationScreen({
                 <Activity size={14} aria-hidden strokeWidth={2.25} /> {capturedCount}/{requiredSteps} captured
               </span>
             </div>
-            <h2 className="cal-hero-title">Set Up the Smart Glove</h2>
+            <h2 className="cal-hero-title">Smart Glove Setup</h2>
             <p className="cal-hero-copy">
-              Start calibration, then hold each prompted shape for 3 seconds. The live hand view stays active while the glove records your raw range.
+              Capture only the required hand shapes for this game. Hold each prompt for 3 seconds while the live preview mirrors your glove.
             </p>
             <div className="cal-progress-shell" aria-label="Calibration completion">
               <div className="cal-progress-bar-wrap">
@@ -1888,14 +2265,14 @@ function CalibrationScreen({
           </div>
           <div className="cal-hero-visual">
             <Canvas
-              style={{ height: 220, width: "100%", borderRadius: 12, background: "#1e293b" }}
+              className="cal-preview-canvas"
               camera={{ position: [0, 0.15, 1.4], fov: 50 }}
             >
               <ambientLight intensity={0.9} />
               <directionalLight position={[3, 5, 2]} intensity={1.4} />
               <HandModel3D bends={input.fingerBends} />
             </Canvas>
-            <p style={{ textAlign: "center", fontSize: "0.72rem", color: "var(--text-muted, #64748b)", marginTop: "0.35rem" }}>
+            <p className="cal-preview-caption">
               Live glove preview — follow the active prompt
             </p>
           </div>
@@ -1905,7 +2282,7 @@ function CalibrationScreen({
           <div className="cal-finger-panel__intro">
             <div>
               <h3 id="cal-live-heading">{activeTarget ? activeTarget.label : "Ready to calibrate"}</h3>
-              <p>{activeInstruction}</p>
+              <p>{visibleInstruction}</p>
             </div>
             <span className={`cal-status ${hasFreshRaw ? "cal-status--ok" : "cal-status--muted"}`}>
               {hasFreshRaw ? "Live glove" : "Waiting for glove"}
@@ -1913,12 +2290,22 @@ function CalibrationScreen({
           </div>
           <div className="cal-progress-shell" aria-label="Current calibration hold">
             <div className="cal-progress-bar-wrap">
-              <div className="cal-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={CALIBRATION_HOLD_MS} aria-valuenow={holdProgressMs}>
+              <div
+                className="cal-progress-bar"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={activeTarget?.kind === "carrom-flick" ? CARROM_FLICK_REQUIRED_COUNT : CALIBRATION_HOLD_MS}
+                aria-valuenow={activeTarget?.kind === "carrom-flick" ? carromFlickState.count : holdProgressMs}
+              >
                 <div className="cal-progress-bar-fill" style={{ width: `${holdPct}%` }} />
               </div>
             </div>
             <span className="cal-progress-chip">
-              {calibrationPhase === "hold" ? `${remainingHoldSeconds}s hold` : ready ? "Complete" : calibrationPhase === "captured" ? "Rest before next" : "Not holding"}
+              {activeTarget?.kind === "carrom-flick" && calibrationPhase === "hold"
+                ? `${carromFlickState.count}/${CARROM_FLICK_REQUIRED_COUNT} flicks`
+                : calibrationPhase === "hold"
+                  ? `${remainingHoldSeconds}s hold`
+                  : ready ? "Complete" : calibrationPhase === "captured" ? "Rest before next" : "Not holding"}
             </span>
           </div>
           {activeQuality ? (
@@ -1929,14 +2316,21 @@ function CalibrationScreen({
 
           <div className="cal-finger-strip" role="list">
             {calibrationTargets.map((target, index) => {
-              const captured = target.kind === "step" ? Boolean(steps[target.step]) : Boolean(fingerTaps[target.finger]);
+              const captured =
+                target.kind === "step"
+                  ? Boolean(steps[target.step])
+                  : target.kind === "finger"
+                    ? Boolean(fingerTaps[target.finger])
+                    : carromFlickState.count >= CARROM_FLICK_REQUIRED_COUNT;
               const active = calibrationPhase !== "idle" && index === activeIndex;
               const quality = qualityByTarget[target.id];
               return (
                 <div key={target.id} role="listitem" className={["cal-finger-pill", captured ? "is-captured" : "", active ? "is-next" : "", captured ? "" : "is-pending"].filter(Boolean).join(" ")}>
                   <span className="cal-finger-pill__ix" aria-hidden>{index + 1}</span>
                   <span className="cal-finger-pill__name">{target.label}</span>
-                  <span className="cal-finger-pill__state">{captured ? "Captured" : active ? "Hold" : quality && !quality.ok ? "Retry" : "Queued"}</span>
+                  <span className="cal-finger-pill__state">
+                    {captured ? "Captured" : active ? target.kind === "carrom-flick" ? `${carromFlickState.count}/3` : "Hold" : quality && !quality.ok ? "Retry" : "Queued"}
+                  </span>
                   {captured ? <CheckCircle2 className="cal-finger-pill__check" size={14} aria-hidden strokeWidth={2.5} /> : null}
                 </div>
               );
@@ -1959,7 +2353,7 @@ function CalibrationScreen({
               <div className="calibration-modal-head">
                 <span className={`calibration-modal-state calibration-modal-state--${calibrationPhase}`}>
                   {calibrationPhase === "hold"
-                    ? `${remainingHoldSeconds}s`
+                    ? activeTarget?.kind === "carrom-flick" ? `${carromFlickState.count}/3` : `${remainingHoldSeconds}s`
                     : calibrationPhase === "captured"
                       ? "Rest"
                       : calibrationPhase === "retry"
@@ -1979,7 +2373,7 @@ function CalibrationScreen({
 
               <div className="calibration-modal-preview">
                 <Canvas
-                  style={{ height: 190, width: "100%", borderRadius: 16, background: "#1e293b" }}
+                  className="cal-modal-preview-canvas"
                   camera={{ position: [0, 0.15, 1.4], fov: 50 }}
                 >
                   <ambientLight intensity={0.9} />
@@ -1995,11 +2389,21 @@ function CalibrationScreen({
                   </div>
                   <div className="cal-progress-shell" aria-label="Modal calibration hold">
                     <div className="cal-progress-bar-wrap">
-                      <div className="cal-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={CALIBRATION_HOLD_MS} aria-valuenow={holdProgressMs}>
+                      <div
+                        className="cal-progress-bar"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={activeTarget?.kind === "carrom-flick" ? CARROM_FLICK_REQUIRED_COUNT : CALIBRATION_HOLD_MS}
+                        aria-valuenow={activeTarget?.kind === "carrom-flick" ? carromFlickState.count : holdProgressMs}
+                      >
                         <div className="cal-progress-bar-fill" style={{ width: `${holdPct}%` }} />
                       </div>
                     </div>
-                    <span className="cal-progress-chip">Keep holding until the ring fills.</span>
+                    <span className="cal-progress-chip">
+                      {activeTarget?.kind === "carrom-flick"
+                        ? `Do ${CARROM_FLICK_REQUIRED_COUNT} clean flicks with one finger.`
+                        : "Keep holding until the ring fills."}
+                    </span>
                   </div>
                 </div>
               ) : null}
@@ -2013,7 +2417,7 @@ function CalibrationScreen({
               <div className="calibration-modal-actions">
                 {calibrationPhase === "prepare" ? (
                   <button type="button" className="primary-button patient-flow-primary" disabled={!hasFreshRaw} onClick={beginCurrentHold}>
-                    Begin 3s Hold
+                    {activeTarget?.kind === "carrom-flick" ? "Begin 3 Flicks" : "Begin 3s Hold"}
                   </button>
                 ) : null}
                 {calibrationPhase === "captured" ? (
@@ -2051,12 +2455,14 @@ function CalibrationScreen({
           </p>
         )}
 
-        <button type="button" className="primary-button patient-flow-cta patient-flow-primary" disabled={!ready} onClick={finish}>
-          Continue
-        </button>
-        <button type="button" className="secondary-button patient-flow-cta" onClick={onSkip}>
-          Skip Calibration and Play
-        </button>
+        <div className="cal-page-actions">
+          <button type="button" className="primary-button patient-flow-cta patient-flow-primary" disabled={!ready} onClick={finish}>
+            Continue
+          </button>
+          <button type="button" className="secondary-button patient-flow-cta" onClick={onSkip}>
+            Skip Calibration and Play
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -2210,7 +2616,7 @@ function ResultsPage({
   postCheck?: CheckIn;
   calibration?: CalibrationData;
   gameResult?: GamePlayResult;
-  saveState: "idle" | "saving" | "saved" | "error";
+  saveState: "idle" | "saving" | "saved" | "pending-sync" | "error";
   saveMessage: string;
   onSave: () => void;
   onDashboard: () => void;
@@ -2261,13 +2667,13 @@ function ResultsPage({
         <div className="assignment-actions">
           <button type="button" className="primary-button" onClick={onSave} disabled={saveState === "saving" || saveState === "saved"}>
             <Save size={18} />
-            {saveState === "saving" ? "Saving..." : saveState === "saved" ? "Saved" : "Save Result"}
+            {saveState === "saving" ? "Saving..." : saveState === "saved" ? "Saved" : saveState === "pending-sync" ? "Retry Sync" : "Save Result"}
           </button>
           <button type="button" className="secondary-button" onClick={onDashboard}>
             Back to Dashboard
           </button>
         </div>
-        {saveMessage && <p className={saveState === "error" ? "error-text" : "safe-note"}>{saveMessage}</p>}
+        {saveMessage && <p className={saveState === "error" || saveState === "pending-sync" ? "error-text" : "safe-note"}>{saveMessage}</p>}
       </article>
     </section>
   );
@@ -2298,20 +2704,21 @@ function PatientRecoveryProgress({
   results: SessionResult[];
 }) {
   const sessions = recentPatientSessions(patient, results);
-  const chronologicalSessions = sessions.slice().reverse();
+  const graphSessions = sessions.length >= 2 ? sessions : demoGraphSessions(patient.id);
+  const chronologicalSessions = graphSessions.slice().reverse();
   const resultTrend = results.slice().reverse();
-  const totalReps = sessions.reduce((sum, session) => sum + session.repsCompleted, 0);
-  const averageAccuracy = sessions.length
-    ? Math.round(sessions.reduce((sum, session) => sum + (session.accuracy ?? session.averageAccuracy ?? 0), 0) / sessions.length)
+  const totalReps = graphSessions.reduce((sum, session) => sum + session.repsCompleted, 0);
+  const averageAccuracy = graphSessions.length
+    ? Math.round(graphSessions.reduce((sum, session) => sum + (session.accuracy ?? session.averageAccuracy ?? 0), 0) / graphSessions.length)
     : 0;
-  const bestAccuracy = sessions.length
-    ? Math.max(...sessions.map((session) => session.accuracy ?? session.averageAccuracy ?? 0))
+  const bestAccuracy = graphSessions.length
+    ? Math.max(...graphSessions.map((session) => session.accuracy ?? session.averageAccuracy ?? 0))
     : 0;
-  const latestAccuracy = sessions[0]?.accuracy ?? sessions[0]?.averageAccuracy ?? 0;
+  const latestAccuracy = graphSessions[0]?.accuracy ?? graphSessions[0]?.averageAccuracy ?? 0;
   const firstAccuracy = chronologicalSessions[0]?.accuracy ?? chronologicalSessions[0]?.averageAccuracy ?? latestAccuracy;
   const accuracyDelta = Math.round(latestAccuracy - firstAccuracy);
-  const latestPain = results[0]?.painAfter.pain;
-  const firstPain = resultTrend[0]?.painBefore.pain ?? latestPain;
+  const latestPain = results[0]?.painAfter.pain ?? graphSessions[0]?.painAfter;
+  const firstPain = resultTrend[0]?.painBefore.pain ?? chronologicalSessions[0]?.painBefore ?? latestPain;
   const painDelta = latestPain !== undefined && firstPain !== undefined ? latestPain - firstPain : 0;
 
   const sessionChart = chronologicalSessions.slice(-8).map((session, index) => ({
@@ -2321,11 +2728,17 @@ function PatientRecoveryProgress({
     accuracy: session.accuracy ?? session.averageAccuracy ?? 0
   }));
 
-  const symptomChart = resultTrend.slice(-8).map((result) => ({
-    label: formatDate(result.startedAt),
-    pain: result.painAfter.pain,
-    fatigue: result.painAfter.fatigue
-  }));
+  const symptomChart = resultTrend.length
+    ? resultTrend.slice(-8).map((result) => ({
+        label: formatDate(result.startedAt),
+        pain: result.painAfter.pain,
+        fatigue: result.painAfter.fatigue
+      }))
+    : chronologicalSessions.slice(-8).map((session) => ({
+        label: formatDate(session.startedAt),
+        pain: session.painAfter ?? 0,
+        fatigue: session.fatigueAfter ?? 0
+      }));
 
   const assignmentProgress = assignments.map((assignment) => {
     const matchingResults = results.filter((result) => result.assignmentId === assignment.id);
@@ -2481,7 +2894,9 @@ function PatientRecoveryProgress({
                 <h3>{session.repsCompleted} reps</h3>
                 <p>{session.accuracy ?? session.averageAccuracy}% accuracy{session.weakestFinger ? ` · Focus: ${fingerLabels[session.weakestFinger]}` : ""}</p>
               </div>
-              <span className="status-pill status-active">Saved</span>
+              <span className={`status-pill ${session.syncStatus === "pending" ? "status-review" : "status-active"}`}>
+                {session.syncStatus === "pending" ? "Pending Sync" : session.syncStatus === "local-only" ? "Local Only" : "Saved"}
+              </span>
             </div>
           ))}
           {sessions.length === 0 ? <EmptyState title="No sessions saved yet" detail="Finish a rehab game and save the result to see progress here." /> : null}

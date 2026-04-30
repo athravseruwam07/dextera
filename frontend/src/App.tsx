@@ -48,7 +48,7 @@ import {
   fetchAppointments,
   fetchAssignments,
   fetchBackendPatient,
-  fetchBackendPatients,
+  fetchBackendPatientSummaries,
   fetchDifficultyRecommendation,
   fetchExerciseAssignments,
   generateAiSummary,
@@ -63,6 +63,7 @@ import {
   detectWeakestFinger,
   getAverageAccuracy,
   getDifficultyRecommendation as getLocalDifficultyRecommendation,
+  getAccuracyTrend,
   getImprovementPercent,
   getLatestAccuracy,
   getPainFatigueTrend,
@@ -99,6 +100,7 @@ import { PatientExperience, type PatientExerciseRouteStep, type PatientScreen } 
 import { useGloveData } from "./lib/useGloveData";
 import { Canvas } from "@react-three/fiber";
 import { HandModel3D } from "./vr/components/HandModel3D";
+import { HandMovementSection } from "./vr/components/HandMovementSection";
 import { fetchCalibration, saveCalibration } from "./patient/patientApi";
 import { calibratedBendsFromRaw } from "./patient/ballPickupGrip";
 import {
@@ -140,6 +142,7 @@ function markExerciseAssignmentCompleted(
 }
 
 const localPatientSessionKey = "dextera.localPatientSession.v1";
+const localExerciseAssignmentsKey = "dextera.exerciseAssignments.v1";
 
 type LocalPatientSession = {
   email: string;
@@ -173,6 +176,35 @@ function clearLocalPatientSession() {
   }
 }
 
+function readLocalExerciseAssignments(): ExerciseAssignment[] {
+  try {
+    const raw = localStorage.getItem(localExerciseAssignmentsKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is ExerciseAssignment =>
+      Boolean(
+        item &&
+        typeof item.id === "string" &&
+        typeof item.patientId === "string" &&
+        typeof item.exerciseId === "string" &&
+        typeof item.assignedAt === "string" &&
+        (item.status === "assigned" || item.status === "completed")
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalExerciseAssignments(assignments: ExerciseAssignment[]) {
+  try {
+    localStorage.setItem(localExerciseAssignmentsKey, JSON.stringify(assignments));
+  } catch {
+    // Ignore storage failures; server state or in-memory state can still drive the UI.
+  }
+}
+
 type AppRoute =
   | { kind: "landing" }
   | { kind: "sign-in"; role: AuthRole }
@@ -194,6 +226,7 @@ const doctorViewPaths: Partial<Record<ViewName, string>> = {
 
 const patientScreenPaths: Record<PatientScreen, string> = {
   home: "/patient/plan",
+  games: "/patient/rehab-games",
   calendar: "/patient/calendar",
   progress: "/patient/progress",
   assistant: "/patient/assistant"
@@ -232,6 +265,7 @@ function parseAppRoute(pathname: string): AppRoute {
     }
     const screen = segments[1] as PatientScreen | undefined;
     if (screen === "calendar" || screen === "progress" || screen === "assistant") return { kind: "patient", screen };
+    if (segments[1] === "rehab-games" || segments[1] === "games") return { kind: "patient", screen: "games" };
     return { kind: "patient", screen: "home" };
   }
 
@@ -1364,9 +1398,9 @@ function ProfilePage({
   const [removingAssignmentId, setRemovingAssignmentId] = useState<string | null>(null);
   const patientAssignmentList = patientAssignments(patient.id, assignments);
   const patientAlertList = patientAlerts(patient.id, alerts);
-  const accuracyTrend = patient.sessions.slice().reverse().map((session) => ({
-    date: formatShortDate(session.startedAt),
-    accuracy: session.accuracy ?? session.averageAccuracy
+  const accuracyTrend = getAccuracyTrend(patient.id, patient.sessions).map((item) => ({
+    ...item,
+    date: formatShortDate(item.date)
   }));
   const repsTrend = getRepsTrend(patient.id, patient.sessions);
   const painFatigueTrend = getPainFatigueTrend(patient.id, patient.sessions);
@@ -1920,11 +1954,13 @@ function PatientsRosterPage({
   patients,
   assignments,
   alerts,
+  loading = false,
   onSelectPatient
 }: {
   patients: Patient[];
   assignments: Assignment[];
   alerts: Alert[];
+  loading?: boolean;
   onSelectPatient: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -1935,49 +1971,106 @@ function PatientsRosterPage({
   );
 
   return (
-    <section className="page-stack">
-      <div className="page-heading">
+    <section className="page-stack patient-roster-page">
+      <div className="page-heading patient-roster-heading">
         <div>
           <span className="eyebrow">Patient roster</span>
           <h2>Patients</h2>
           <p>Open a patient workspace to review progress, assignments, live monitoring, appointments, and notes.</p>
         </div>
-        <label className="search-box">
+        <label className="search-box patient-roster-search">
           <Search size={17} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients" />
         </label>
       </div>
-      <div className="patient-grid">
+      <div className="patient-roster-meta" aria-label="Patient roster summary">
+        <span>{filtered.length} shown</span>
+        <span>{patients.length} total</span>
+        {loading ? <span>Updating...</span> : null}
+      </div>
+      <div className="patient-roster-grid">
         {filtered.map((patient) => {
           const weakest = detectWeakestFinger(patient.sessions);
           const adherence = getWeeklyCompletionRate(patient.id, assignments, patient.sessions);
           const alertsForPatient = patientAlerts(patient.id, alerts);
+          const latestAccuracy = getLatestAccuracy(patient.id, patient.sessions);
+          const activeAssignments = patientAssignments(patient.id, assignments).length;
+          const sessionsThisWeek = patientSessionsThisWeek(patient);
           return (
-            <article className="patient-card" key={patient.id}>
-              <div className="patient-card-head">
-                <div className="avatar">{patient.name.slice(0, 1)}</div>
-                <div>
-                  <h3>{patient.name}</h3>
-                  <p>{patient.condition || patient.diagnosis}</p>
+            <article className="patient-roster-card" key={patient.id}>
+              <header className="patient-roster-card-head">
+                <div className="patient-roster-identity">
+                  <div className="avatar patient-roster-avatar">{patient.name.slice(0, 1)}</div>
+                  <div>
+                    <span>{patient.condition || patient.diagnosis}</span>
+                    <h3>{patient.name}</h3>
+                  </div>
                 </div>
                 <StatusBadge status={patient.status} />
+              </header>
+
+              <p className="patient-roster-goal">{patient.recoveryGoal || patient.goal}</p>
+
+              <div className="patient-roster-metrics">
+                <div>
+                  <span>Adherence</span>
+                  <strong>{adherence}%</strong>
+                </div>
+                <div>
+                  <span>Accuracy</span>
+                  <strong>{latestAccuracy}%</strong>
+                </div>
+                <div>
+                  <span>Weakest</span>
+                  <strong>{fingerLabels[weakest.weakestFinger]}</strong>
+                </div>
+                <div>
+                  <span>Alerts</span>
+                  <strong>{alertsForPatient.length}</strong>
+                </div>
               </div>
-              <p className="patient-goal">Goal: {patient.recoveryGoal || patient.goal}</p>
-              <ProgressBar label="Weekly adherence" percent={adherence} />
-              <div className="patient-stat-row">
-                <span>{getLatestAccuracy(patient.id, patient.sessions)}% latest accuracy</span>
-                <span>{fingerLabels[weakest.weakestFinger]} weakest</span>
-                <span>{alertsForPatient.length} alerts</span>
+
+              <div className="patient-roster-footer">
+                <div className="patient-roster-footnotes">
+                  <span>{sessionsThisWeek} sessions this week</span>
+                  <span>{activeAssignments} assigned games</span>
+                </div>
+                <button className="primary-button patient-roster-action" type="button" onClick={() => onSelectPatient(patient.id)}>
+                  <UserRound size={17} />
+                  View patient
+                </button>
               </div>
-              <button className="primary-button" type="button" onClick={() => onSelectPatient(patient.id)}>
-                <UserRound size={17} />
-                View patient
-              </button>
             </article>
           );
         })}
+        {loading && filtered.length === 0 && (
+          <>
+            {[0, 1, 2].map((i) => (
+              <article className="patient-roster-card patient-roster-card--loading" key={i} aria-hidden>
+                <header className="patient-roster-card-head">
+                  <div className="patient-roster-identity">
+                    <div className="avatar patient-roster-avatar" />
+                    <div>
+                      <span />
+                      <h3 />
+                    </div>
+                  </div>
+                </header>
+                <p className="patient-roster-goal" />
+                <div className="patient-roster-metrics">
+                  {[0, 1, 2, 3].map((item) => (
+                    <div key={item}>
+                      <span />
+                      <strong />
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </>
+        )}
       </div>
-      {filtered.length === 0 && <EmptyState title="No patients found" description="Try a different name, condition, or goal." />}
+      {!loading && filtered.length === 0 && <EmptyState title="No patients found" description="Try a different name, condition, or goal." />}
     </section>
   );
 }
@@ -2306,6 +2399,8 @@ function GloveDevPage({ patientId }: { patientId: string }) {
           <li>Capture OPEN, capture FIST, save calibration, then verify the live 3D hand</li>
         </ol>
       </div>
+
+      <HandMovementSection />
     </section>
   );
 }
@@ -2524,7 +2619,9 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [aiSummaries, setAiSummaries] = useState<Record<string, AiProgressSummary>>({});
   const [difficultyRecommendations, setDifficultyRecommendations] = useState<Record<string, DifficultyRecommendation>>({});
-  const [exerciseAssignments, setExerciseAssignments] = useState<ExerciseAssignment[]>([]);
+  const [exerciseAssignments, setExerciseAssignments] = useState<ExerciseAssignment[]>(() => readLocalExerciseAssignments());
+  const [exerciseAssignmentError, setExerciseAssignmentError] = useState("");
+  const [busyExerciseKeys, setBusyExerciseKeys] = useState<string[]>([]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -2545,11 +2642,14 @@ export default function App() {
     document.documentElement.dataset.theme = "light";
     try {
       localStorage.removeItem("dextera.theme");
-      localStorage.removeItem("dextera.exerciseAssignments.v1");
     } catch {
       // Ignore storage failures; the visual theme still applies for this session.
     }
   }, []);
+
+  useEffect(() => {
+    writeLocalExerciseAssignments(exerciseAssignments);
+  }, [exerciseAssignments]);
 
 
   const [selectedPatientId, setSelectedPatientId] = useState(
@@ -2576,6 +2676,7 @@ export default function App() {
   );
   const [simulatorEnabled, setSimulatorEnabled] = useState(true);
   const [backendConnected, setBackendConnected] = useState(false);
+  const [patientsLoading, setPatientsLoading] = useState(false);
   const [activeSession, setActiveSession] = useState<SessionDraft | null>(null);
   const activeSessionRef = useRef<SessionDraft | null>(null);
   const previousGestureRef = useRef<GestureName>("open");
@@ -2630,6 +2731,13 @@ export default function App() {
     [patients, selectedPatientId]
   );
 
+  useEffect(() => {
+    if (!patients.length) return;
+    setSelectedPatientId((current) =>
+      patients.some((patient) => patient.id === current) ? current : patients[0].id
+    );
+  }, [patients]);
+
   const clinicianAssignedGames = useMemo(
     () => selectedPatient ? doctorAssignmentsToPatientCare(patientAssignments(selectedPatient.id, assignments)) : [],
     [assignments, selectedPatient]
@@ -2647,8 +2755,11 @@ export default function App() {
   );
 
   const clinicianAssignedExercises = useMemo(
-    () => selectedPatient ? exerciseAssignments.filter((assignment) => assignment.patientId === selectedPatient.id) : [],
-    [exerciseAssignments, selectedPatient]
+    () =>
+      selectedPatient
+        ? exerciseAssignments.filter((assignment) => assignment.patientId === selectedPatient.id)
+        : [],
+    [authRole, exerciseAssignments, selectedPatient]
   );
 
   const doctorGameLibraryPatient = useMemo(() => createDoctorGameLibraryPatient(demoDoctor.name), []);
@@ -2709,6 +2820,7 @@ export default function App() {
     async function loadBackendData() {
       if (authRole === "patient") return;
       if (productionAuth && (!loggedIn || authRole !== "doctor")) return;
+      if (!cancelled) setPatientsLoading(true);
       try {
         await checkBackendHealth();
         if (productionAuth && supabase) {
@@ -2718,7 +2830,7 @@ export default function App() {
             return;
           }
         }
-        const backendPatients = (await fetchBackendPatients()).filter((patient) => !isDemoPatient(patient));
+        const backendPatients = (await fetchBackendPatientSummaries()).filter((patient) => !isDemoPatient(patient));
         if (cancelled) return;
 
         setPatients(backendPatients);
@@ -2731,24 +2843,41 @@ export default function App() {
           fetchAlerts().catch(() => []),
           fetchAppointments().catch(() => [])
         ]);
-        if (!cancelled) {
-          setAlerts(backendAlerts.filter((alert) => realPatientIds.has(alert.patientId)));
-          setAppointments(backendAppointments.filter((appointment) => realPatientIds.has(appointment.patientId)));
-          const assignmentLists = await Promise.all(
-            backendPatients.map((patient) => fetchAssignments(patient.id).catch(() => []))
+        if (cancelled) return;
+        setAlerts(backendAlerts.filter((alert) => realPatientIds.has(alert.patientId)));
+        setAppointments(backendAppointments.filter((appointment) => realPatientIds.has(appointment.patientId)));
+        const [assignmentLists, exerciseAssignmentLists] = await Promise.all([
+          Promise.all(backendPatients.map((patient) => fetchAssignments(patient.id).catch(() => []))),
+          Promise.all(backendPatients.map((patient) => fetchExerciseAssignments(patient.id).catch(() => null)))
+        ]);
+        if (cancelled) return;
+        setAssignments(assignmentLists.flat());
+        setExerciseAssignments((current) => {
+          const loadedPatientIds = new Set<string>();
+          const loadedAssignments: ExerciseAssignment[] = [];
+          exerciseAssignmentLists.forEach((list, index) => {
+            if (list === null) return;
+            loadedPatientIds.add(backendPatients[index].id);
+            loadedAssignments.push(...list);
+          });
+          return mergeExerciseAssignments(
+            loadedAssignments,
+            current.filter((assignment) => !loadedPatientIds.has(assignment.patientId))
           );
-          if (!cancelled) setAssignments(assignmentLists.flat());
-          const exerciseAssignmentLists = await Promise.all(
-            backendPatients.map((patient) =>
-              fetchExerciseAssignments(patient.id).catch(() => [])
-            )
-          );
-          if (!cancelled) setExerciseAssignments(exerciseAssignmentLists.flat());
-        }
+        });
+        setPatientsLoading(false);
+
+        void Promise.all(
+          backendPatients.map((patient) => fetchBackendPatient(patient.id).catch(() => patient))
+        ).then((hydratedPatients) => {
+          if (!cancelled) setPatients(hydratedPatients);
+        });
       } catch {
         if (!cancelled) {
           setBackendConnected(false);
         }
+      } finally {
+        if (!cancelled) setPatientsLoading(false);
       }
     }
 
@@ -2847,7 +2976,6 @@ export default function App() {
       try {
         const created = await createAssignment(assignment);
         setAssignments((items) => [created, ...items]);
-        await refreshPatientSideData(assignment.patientId);
         return;
       } catch {
         setBackendConnected(false);
@@ -2880,6 +3008,10 @@ export default function App() {
   };
 
   const handleAssignExercise = async (patientId: string, exerciseId: string) => {
+    if (!patientId) return;
+    const busyKey = `${patientId}:${exerciseId}`;
+    setExerciseAssignmentError("");
+    setBusyExerciseKeys((items) => Array.from(new Set([...items, busyKey])));
     const optimistic: ExerciseAssignment = {
       id: `exercise-assignment-${Date.now()}`,
       patientId,
@@ -2892,33 +3024,62 @@ export default function App() {
     setExerciseAssignments((items) =>
       mergeExerciseAssignments([optimistic], items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId))
     );
-    if (backendConnected) {
+    const mustPersistToBackend = productionAuth || backendConnected;
+    if (mustPersistToBackend) {
       try {
         const created = await createExerciseAssignment({ patientId, exerciseId, assignedAt: optimistic.assignedAt });
         setExerciseAssignments((items) =>
           mergeExerciseAssignments([created], items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId))
         );
-        await refreshPatientSideData(patientId);
-        return;
-      } catch {
+      } catch (error) {
         setBackendConnected(false);
+        setExerciseAssignments((items) => items.filter((item) => item.id !== optimistic.id));
+        setExerciseAssignmentError(
+          error instanceof Error
+            ? `Could not assign exercise: ${error.message}`
+            : "Could not assign exercise. Check the backend and try again."
+        );
+      }
+    } else {
+      try {
+        await checkBackendHealth();
+        const created = await createExerciseAssignment({ patientId, exerciseId, assignedAt: optimistic.assignedAt });
+        setBackendConnected(true);
+        setExerciseAssignments((items) =>
+          mergeExerciseAssignments([created], items.filter((item) => item.patientId !== patientId || item.exerciseId !== exerciseId))
+        );
+      } catch {
+        // Offline/demo fallback: keep the local assignment visible in this browser.
       }
     }
+    setBusyExerciseKeys((items) => items.filter((item) => item !== busyKey));
   };
 
   const handleUnassignExercise = async (assignmentId: string) => {
     const assignment = exerciseAssignments.find((item) => item.id === assignmentId);
-    if (backendConnected) {
+    const busyKey = assignment ? `${assignment.patientId}:${assignment.exerciseId}` : assignmentId;
+    setExerciseAssignmentError("");
+    setBusyExerciseKeys((items) => Array.from(new Set([...items, busyKey])));
+    if (backendConnected || productionAuth) {
       try {
         await deleteExerciseAssignment(assignmentId);
         setExerciseAssignments((items) => items.filter((item) => item.id !== assignmentId));
         if (assignment) await refreshPatientSideData(assignment.patientId);
         return;
-      } catch {
+      } catch (error) {
         setBackendConnected(false);
+        setExerciseAssignmentError(
+          error instanceof Error
+            ? `Could not remove exercise: ${error.message}`
+            : "Could not remove exercise. Check the backend and try again."
+        );
+      } finally {
+        setBusyExerciseKeys((items) => items.filter((item) => item !== busyKey));
       }
+      return;
     }
     setExerciseAssignments((items) => items.filter((item) => item.id !== assignmentId));
+    setBusyExerciseKeys((items) => items.filter((item) => item !== busyKey));
   };
 
   const handleExerciseCompleted = async (assignment: ExerciseAssignment, result: NonNullable<ExerciseAssignment["result"]>) => {
@@ -3191,7 +3352,7 @@ export default function App() {
 	      return <ClinicAppointmentsPage patients={patients} appointments={appointments} onSelectPatient={selectPatient} />;
 	    }
 	    if (view === "patients") {
-	      return <PatientsRosterPage patients={patients} assignments={assignments} alerts={alerts} onSelectPatient={selectPatient} />;
+	      return <PatientsRosterPage patients={patients} assignments={assignments} alerts={alerts} loading={patientsLoading} onSelectPatient={selectPatient} />;
 	    }
 	    if (view === "glove-dev") {
       return <GloveDevPage patientId="demo-patient-1" />;
@@ -3200,7 +3361,14 @@ export default function App() {
       return (
         <ExercisesPage
           patients={patients}
+          selectedPatientId={selectedPatient?.id ?? patients[0]?.id ?? ""}
           assignments={exerciseAssignments}
+          loading={patientsLoading}
+          busyExerciseIds={busyExerciseKeys
+            .filter((key) => key.startsWith(`${selectedPatient?.id ?? patients[0]?.id ?? ""}:`))
+            .map((key) => key.split(":").slice(1).join(":"))}
+          error={exerciseAssignmentError}
+          onSelectPatient={setSelectedPatientId}
           onAssign={handleAssignExercise}
           onUnassign={handleUnassignExercise}
         />
@@ -3229,6 +3397,7 @@ export default function App() {
             patients={patients}
             assignments={assignments}
             alerts={alerts}
+            loading={patientsLoading}
             onSelectPatient={selectPatient}
           />
         );

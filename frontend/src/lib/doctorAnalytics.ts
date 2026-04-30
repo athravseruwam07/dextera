@@ -1,5 +1,81 @@
 import type { Alert, Assignment, FingerName, GestureEvent, Patient, RehabSession } from "../types";
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function hashPatientId(patientId: string) {
+  return patientId.split("").reduce((sum, char, index) => sum + char.charCodeAt(0) * (index + 7), 0);
+}
+
+function demoSessionDate(daysAgo: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  date.setHours(16, 15, 0, 0);
+  return date;
+}
+
+export function demoGraphSessions(patientId: string): RehabSession[] {
+  const seed = hashPatientId(patientId);
+  const gameCycle = [
+    { id: "ball-pickup", name: "Ball Pickup", target: 10 },
+    { id: "finger-tap-piano", name: "Finger Tap Piano", target: 12 },
+    { id: "bubble-pop", name: "Bubble Pop", target: 8 },
+    { id: "carrom-flick", name: "Carrom", target: 6 }
+  ];
+  const daysAgo = [35, 29, 23, 18, 13, 8, 4, 1];
+  const startAccuracy = 58 + (seed % 8);
+  const weakFinger: FingerName[] = ["ring", "pinky", "middle", "index"];
+
+  return daysAgo.map((day, index) => {
+    const game = gameCycle[(seed + index) % gameCycle.length];
+    const date = demoSessionDate(day);
+    const accuracy = Math.round(clamp(startAccuracy + index * 3.7 + Math.sin(seed + index) * 3.2, 48, 94));
+    const targetReps = game.target + ((seed + index) % 3);
+    const repsCompleted = Math.round(clamp(targetReps * (0.62 + index * 0.045 + ((seed + index) % 2) * 0.04), 3, targetReps));
+    const fatigueBefore = clamp(2 + ((seed + index) % 3), 0, 10);
+    const fatigueAfter = clamp(fatigueBefore + (index < 2 ? 2 : index < 5 ? 1 : 0), 0, 10);
+    const painBefore = clamp(1 + ((seed + index * 2) % 3), 0, 10);
+    const painAfter = clamp(painBefore + (index < 3 ? 1 : index > 5 ? -1 : 0), 0, 10);
+
+    return {
+      id: `demo-graph-${patientId}-${index}`,
+      patientId,
+      assignmentId: `${patientId}-${game.id}`,
+      gameId: game.id,
+      gameName: game.name,
+      exerciseId: `${patientId}-${game.id}`,
+      exerciseName: game.name,
+      startedAt: date.toISOString(),
+      endedAt: new Date(date.getTime() + (5 + index) * 60_000).toISOString(),
+      repsCompleted,
+      repsRequired: targetReps,
+      targetReps,
+      successfulReps: repsCompleted,
+      failedAttempts: Math.max(0, targetReps - repsCompleted),
+      accuracy,
+      timeTaken: (5 + index) * 60,
+      score: repsCompleted * 90 + accuracy * 3,
+      inputMode: "demo" as const,
+      painBefore,
+      painAfter,
+      fatigueBefore,
+      fatigueAfter,
+      weakestFinger: weakFinger[(seed + index) % weakFinger.length],
+      averageAccuracy: accuracy,
+      bestFistScore: Math.min(100, accuracy + 6),
+      fatigueWarnings: fatigueAfter - fatigueBefore >= 3 ? 1 : 0,
+      notes: "Demo trend sample for graph previews.",
+      events: []
+    };
+  }).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+function sessionsForGraph(patientId: string, sessions: RehabSession[]) {
+  const patientSessions = sessions.filter((session) => session.patientId === patientId);
+  return patientSessions.length >= 2 ? patientSessions : demoGraphSessions(patientId);
+}
+
 export function detectWeakestFinger(items: Array<GestureEvent | RehabSession>): {
   weakestFinger: FingerName;
   confidence: number;
@@ -49,36 +125,32 @@ export function getWeeklyCompletionRate(patientId: string, assignments: Assignme
 }
 
 export function getAverageAccuracy(patientId: string, sessions: RehabSession[]) {
-  const patientSessions = sessions.filter((session) => session.patientId === patientId);
+  const patientSessions = sessionsForGraph(patientId, sessions);
   if (!patientSessions.length) return 0;
   return Math.round(patientSessions.reduce((sum, session) => sum + (session.accuracy ?? session.averageAccuracy), 0) / patientSessions.length);
 }
 
 export function getLatestAccuracy(patientId: string, sessions: RehabSession[]) {
-  return [...sessions]
-    .filter((session) => session.patientId === patientId)
+  return [...sessionsForGraph(patientId, sessions)]
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]?.accuracy ?? 0;
 }
 
 export function getAccuracyTrend(patientId: string, sessions: RehabSession[]) {
-  return sessions
-    .filter((session) => session.patientId === patientId)
+  return sessionsForGraph(patientId, sessions)
     .slice()
     .reverse()
     .map((session) => ({ date: session.startedAt.slice(0, 10), accuracy: session.accuracy ?? session.averageAccuracy }));
 }
 
 export function getRepsTrend(patientId: string, sessions: RehabSession[]) {
-  return sessions
-    .filter((session) => session.patientId === patientId)
+  return sessionsForGraph(patientId, sessions)
     .slice()
     .reverse()
     .map((session) => ({ date: session.startedAt.slice(0, 10), repsCompleted: session.repsCompleted }));
 }
 
 export function getPainFatigueTrend(patientId: string, sessions: RehabSession[]) {
-  return sessions
-    .filter((session) => session.patientId === patientId)
+  return sessionsForGraph(patientId, sessions)
     .slice()
     .reverse()
     .map((session) => ({
@@ -91,7 +163,7 @@ export function getPainFatigueTrend(patientId: string, sessions: RehabSession[])
 }
 
 export function getImprovementPercent(patientId: string, sessions: RehabSession[]) {
-  const ordered = sessions.filter((session) => session.patientId === patientId).slice().reverse();
+  const ordered = sessionsForGraph(patientId, sessions).slice().reverse();
   if (ordered.length < 2) return 0;
   return Math.round((ordered[ordered.length - 1].accuracy ?? ordered[ordered.length - 1].averageAccuracy) - (ordered[0].accuracy ?? ordered[0].averageAccuracy));
 }

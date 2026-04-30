@@ -102,6 +102,40 @@ const demoPath: Array<{ gesture: GestureName; position: HandPosition }> = [
   { gesture: "flick", position: { x: 52, y: 22, z: 0 } }
 ];
 
+export function classifyWithCapturedShapes(
+  bends: FingerBends,
+  steps: CalibrationData["steps"] | undefined,
+  open: FingerBends,
+  fist: FingerBends
+): GestureName {
+  const candidates: Array<{ gesture: GestureName; bends: FingerBends }> = [
+    { gesture: "open", bends: calibratedBendsFromRaw({ ...open }, open, fist) },
+    { gesture: "fist", bends: calibratedBendsFromRaw({ ...fist }, open, fist) }
+  ];
+
+  if (steps?.point) {
+    candidates.push({ gesture: "point", bends: calibratedBendsFromRaw({ ...steps.point }, open, fist) });
+  }
+  if (steps?.pinch) {
+    candidates.push({ gesture: "pinch", bends: calibratedBendsFromRaw({ ...steps.pinch }, open, fist) });
+  }
+
+  const best = candidates
+    .map((candidate) => ({
+      gesture: candidate.gesture,
+      distance:
+        Math.abs(bends.thumb - candidate.bends.thumb) +
+        Math.abs(bends.index - candidate.bends.index) +
+        Math.abs(bends.middle - candidate.bends.middle) +
+        Math.abs(bends.ring - candidate.bends.ring) +
+        Math.abs(bends.pinky - candidate.bends.pinky)
+    }))
+    .sort((a, b) => a.distance - b.distance)[0];
+
+  if (best && best.distance <= 150) return best.gesture;
+  return classifyGesture(bends);
+}
+
 export function PatientInputProvider({
   children,
   patientId,
@@ -216,13 +250,15 @@ export function PatientInputProvider({
         };
       });
     } else {
-      gesture = event.rawValues && open && fist ? classifyGesture(bends) : event.gesture;
+      gesture = event.rawValues && open && fist
+        ? classifyWithCapturedShapes(bends, calibration?.steps, open, fist)
+        : event.gesture;
     }
     const calibratedEvent = { ...event, ...bends, gesture };
     setCurrentGesture(gesture);
     setFingerBends(bends);
     setEvents((items) => [calibratedEvent, ...detectedTapEvents, ...items].slice(0, 180));
-  }, [calibration?.fingerTapProfiles, calibration?.steps.fist, calibration?.steps.open, effectiveGloveMode, inputMode, patientId]);
+  }, [calibration?.fingerTapProfiles, calibration?.steps, calibration?.steps.fist, calibration?.steps.open, effectiveGloveMode, inputMode, patientId]);
 
   useEffect(() => {
     if (!smartGloveEvent) return;

@@ -5,6 +5,7 @@ import {
   type ComponentType,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type Ref,
   type ReactNode,
   useCallback,
   useEffect,
@@ -13,11 +14,12 @@ import {
   useState
 } from "react";
 import { PatientGameFullscreenContext, type PatientGameFullscreenControls } from "./patientGameFullscreenContext";
-import { CheckCircle2, CircleDot, Crosshair, Maximize2, Minimize2, Music2, Sparkles, Trophy, Volume2, VolumeX } from "lucide-react";
+import { CheckCircle2, CircleDot, Crosshair, Maximize2, Minimize2, Music2, Sparkles, Trophy, Video, VideoOff, Volume2, VolumeX } from "lucide-react";
+import { useCameraTracking } from "../vr/input/useCameraTracking";
 import { Box3, DoubleSide, Group, Mesh, Vector3 } from "three";
 import carromBoardModelUrl from "../assets/carrom_board_optimized.glb?url";
 import { fingerNames, gestureLabels, gestureTargets, weakestFinger as weakestFingerFromEvents } from "../lib/gesture";
-import type { FingerName, GameId, GestureEvent, GestureName, HandPosition, PatientCareAssignment } from "../types";
+import type { CalibrationData, FingerName, GameId, GestureEvent, GestureName, HandPosition, PatientCareAssignment } from "../types";
 import {
   emitFingerTap,
   usePatientInput
@@ -26,12 +28,23 @@ import { useFullscreen } from "../lib/useFullscreen";
 import type { GamePlayResult } from "./gameTypes";
 import { FingerTapPianoLanesGame } from "./FingerTapPianoLanes";
 import { ballPickupGripAction } from "./ballPickupGrip";
+import {
+  type BubblePopItem3D,
+  bubblePopVisualHitScore,
+  bubbleWorldToHandPosition,
+  handPositionToBubbleWorld,
+  makeBubblePop3DLayout,
+  makeReplacementBubblePop3D,
+  moveBubblePopItems
+} from "./bubblePop3D";
 import { loadPianoMuted, playPianoSound, storePianoMuted, unlockPianoAudio } from "./pianoAudio";
 
 export type { GamePlayResult } from "./gameTypes";
 
 type GameProps = {
   assignment: PatientCareAssignment;
+  accessibilityMode?: boolean;
+  calibration?: CalibrationData;
   onComplete: (result: GamePlayResult) => void;
 };
 
@@ -142,10 +155,16 @@ function Cursor({ position }: { position: HandPosition }) {
 /** Minimal fingertip tracker for Bubble Pop — ring + halo, no hand illustration. */
 function BubblePopAimCursor({
   position,
-  gesture
+  gesture,
+  cursorRef,
+  directControl = false,
+  accessible = false
 }: {
   position: HandPosition;
   gesture: GestureName;
+  cursorRef?: Ref<HTMLDivElement>;
+  directControl?: boolean;
+  accessible?: boolean;
 }) {
   const mode =
     gesture === "pinch"
@@ -156,8 +175,9 @@ function BubblePopAimCursor({
 
   return (
     <div
-      className={`bubble-pop-aim-cursor ${mode}`}
-      style={{ left: `${position.x}%`, top: `${position.y}%` }}
+      ref={cursorRef}
+      className={`bubble-pop-aim-cursor ${mode}${accessible ? " bubble-pop-aim-cursor--accessible" : ""}`}
+      style={directControl ? { left: `${position.x}%`, top: `${position.y}%` } : { left: `${position.x}%`, top: `${position.y}%` }}
       aria-hidden="true"
     >
       <span className="bubble-pop-aim-cursor__pulse" aria-hidden />
@@ -264,6 +284,8 @@ function GameCompletionCelebration({
 
 export function PatientGame({
   assignment,
+  accessibilityMode = false,
+  calibration,
   onComplete
 }: GameProps) {
   const games: Record<GameId, ComponentType<GameProps>> = {
@@ -371,6 +393,8 @@ export function PatientGame({
         <div className={`patient-game-stage-wrap${completionResult ? " patient-game-stage-wrap--paused" : ""}`}>
           <Component
             assignment={assignment}
+            accessibilityMode={accessibilityMode}
+            calibration={calibration}
             onComplete={handleGameCompletion}
           />
         </div>
@@ -420,7 +444,7 @@ function currentAccuracy(successes: number, failed: number) {
   return clampPercent((successes / Math.max(successes + failed, 1)) * 100);
 }
 
-function BallPickupGame({ assignment, onComplete }: GameProps) {
+function BallPickupGame({ assignment, accessibilityMode = false, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
@@ -430,6 +454,7 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
   const selectedRef = useRef(false);
   const previousGripRef = useRef<"open" | "fist">("open");
   const closedAwayFromBallRef = useRef(false);
+  const lastCameraSeenAtRef = useRef(0);
   const successesRef = useRef(0);
   const failedRef = useRef(0);
   const [ballPosition, setBallPosition] = useState<Vec3>(ballSpawns[0]);
@@ -441,18 +466,91 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
   const [started, setStarted] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [pauseReason, setPauseReason] = useState<"manual" | "tracking" | null>(null);
+  const [useCameraPosition, setUseCameraPosition] = useState(true);
   const [successFlash, setSuccessFlash] = useState(false);
   const [feedback, setFeedback] = useState("Move the hand above the ball, then make a fist to pick it up.");
   const targetReps = assignment.config.targetReps;
-  const ballRadius = 0.26;
-  const basketRadius = 0.68;
-  const grabRadius = 0.58;
+  const ballRadius = accessibilityMode ? 0.34 : 0.26;
+  const basketRadius = accessibilityMode ? 0.98 : 0.68;
+  const grabRadius = accessibilityMode ? 0.86 : 0.58;
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [showPreview, setShowPreview] = useState(false);
+
+  const camera = useCameraTracking((lmX, lmY) => {
+    const bounds = boardRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    // Treat the camera frame as a full-screen virtual touchpad (mirrored X for front-cam).
+    // Map to canvas-relative coords — cursor ends up exactly where the hand appears on screen.
+    // This also naturally compresses the required vertical travel (only canvas height matters,
+    // not full camera frame), making depth control far easier than a direct 0→100 mapping.
+    const screenX = (1 - lmX) * window.innerWidth;
+    const screenY = lmY * window.innerHeight;
+    const gameX = Math.max(0, Math.min(100, ((screenX - bounds.left) / bounds.width) * 100));
+    const gameY = Math.max(0, Math.min(100, ((screenY - bounds.top) / bounds.height) * 100));
+    input.setHandPosition({ x: gameX, y: gameY, z: 0 });
+  });
+  const cameraActive = camera.isActive;
+  const cameraLoading = camera.isLoading;
+  const cameraError = camera.error;
+  const startBallCamera = camera.startCamera;
+  const stopBallCamera = camera.stopCamera;
+
   const handWorld = handPositionToWorld(input.handPosition);
   const ballDistance = distance3D(handWorld, ballPosition);
   const canReachBall = ballDistance <= grabRadius;
   const gripGesture: "open" | "fist" = input.currentGesture === "fist" ? "fist" : "open";
   const accuracy = currentAccuracy(successes, failed);
   const roundActive = started && countdown === 0 && !paused;
+
+  useEffect(() => {
+    if (!useCameraPosition) {
+      if (cameraActive || cameraError) stopBallCamera();
+      return;
+    }
+    if (!cameraActive && !cameraLoading && !cameraError) {
+      void startBallCamera();
+    }
+  }, [cameraActive, cameraError, cameraLoading, startBallCamera, stopBallCamera, useCameraPosition]);
+
+  useEffect(() => {
+    if (!camera.landmark) return;
+    lastCameraSeenAtRef.current = Date.now();
+    if (paused && pauseReason === "tracking") {
+      setPauseReason(null);
+      setPaused(false);
+      setFeedback(heldRef.current ? "Holding. Move to the basket, then open your hand to drop." : "Hand found. Move above the ball, then make a fist.");
+    }
+  }, [camera.landmark, pauseReason, paused]);
+
+  useEffect(() => {
+    if (!useCameraPosition || !cameraActive || !started || paused || countdown > 0) return undefined;
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastCameraSeenAtRef.current <= 900) return;
+      setPauseReason("tracking");
+      setPaused(true);
+      setFeedback("Hand is not visible. Move back into the camera view or switch to mouse movement.");
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [cameraActive, countdown, paused, started, useCameraPosition]);
+
+  const toggleBallCameraPosition = useCallback(() => {
+    setUseCameraPosition((enabled) => {
+      const next = !enabled;
+      if (next) {
+        lastCameraSeenAtRef.current = Date.now();
+        setFeedback("Camera movement enabled. Show your hand to move.");
+      }
+      if (!next) {
+        if (pauseReason === "tracking") {
+          setPauseReason(null);
+          setPaused(false);
+        }
+        setFeedback("Mouse movement enabled. Move the cursor over the ball, then use the glove to grab.");
+      }
+      return next;
+    });
+  }, [pauseReason]);
 
   useEffect(() => {
     ballPositionRef.current = ballPosition;
@@ -481,7 +579,7 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
   }, [countdown, paused, started]);
 
   useEffect(() => {
-    if (!started || countdown <= 0) return undefined;
+    if (!started || countdown <= 0 || paused) return undefined;
     const timer = window.setInterval(() => {
       setCountdown((value) => {
         if (value <= 1) {
@@ -492,11 +590,11 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [countdown, started]);
+  }, [countdown, paused, started]);
 
   useEffect(() => {
     function moveByKeyboard(event: KeyboardEvent) {
-      if (!roundActive) return;
+      if (!roundActive || useCameraPosition) return;
       const key = event.key.toLowerCase();
       const direction = {
         x: key === "arrowleft" || key === "a" ? -1 : key === "arrowright" || key === "d" ? 1 : 0,
@@ -514,7 +612,7 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
 
     window.addEventListener("keydown", moveByKeyboard);
     return () => window.removeEventListener("keydown", moveByKeyboard);
-  }, [input, roundActive]);
+  }, [accessibilityMode, input, roundActive, useCameraPosition]);
 
   useEffect(() => {
     if (held) return;
@@ -655,6 +753,7 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
     previousGripRef.current = gripGesture;
     setStarted(true);
     setPaused(false);
+    setPauseReason(null);
     setCountdown(3);
     setFeedback("Get ready. Start with a relaxed open hand.");
   };
@@ -694,22 +793,57 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
               Start
             </button>
           )}
-          <button type="button" className="secondary-button compact-game-button" disabled={!started || countdown > 0} onClick={() => setPaused((value) => !value)}>
+          <button
+            type="button"
+            className="secondary-button compact-game-button"
+            disabled={!started || countdown > 0}
+            onClick={() => {
+              setPaused((value) => {
+                const next = !value;
+                setPauseReason(next ? "manual" : null);
+                return next;
+              });
+            }}
+          >
             {paused ? "Resume" : "Pause"}
           </button>
           <button type="button" className="danger-button compact-game-button" disabled={!started} onClick={completeNow}>
             End Session
           </button>
+          <button
+            type="button"
+            className={useCameraPosition ? "primary-button compact-game-button" : "secondary-button compact-game-button"}
+            onClick={toggleBallCameraPosition}
+            disabled={cameraLoading}
+            title={useCameraPosition ? "Switch to mouse movement" : "Use webcam hand tracking for movement"}
+          >
+            {useCameraPosition ? <VideoOff size={15} /> : <Video size={15} />}
+            {cameraLoading ? "Starting…" : useCameraPosition ? "Use Mouse" : "Use Camera"}
+          </button>
+          {useCameraPosition && cameraActive && (
+            <button
+              type="button"
+              className={showPreview ? "primary-button compact-game-button" : "secondary-button compact-game-button"}
+              onClick={() => setShowPreview((v) => !v)}
+              title="Toggle camera preview overlay"
+            >
+              {showPreview ? "Hide View" : "Show View"}
+            </button>
+          )}
         </div>
       </GameHeader>
       <div
+        ref={boardRef}
         className="ball-3d-board"
         tabIndex={0}
         onPointerMove={(event) => {
-          if (!roundActive) return;
+          if (!roundActive || useCameraPosition) return;
           input.setHandPosition(pointerToInputPosition(event));
         }}
       >
+        {useCameraPosition && cameraActive && showPreview && (
+          <CameraPreview stream={camera.stream} landmark={camera.landmark} />
+        )}
         <Canvas
           shadows
           camera={{ position: [0, 4.45, 6.2], fov: 46 }}
@@ -734,10 +868,117 @@ function BallPickupGame({ assignment, onComplete }: GameProps) {
           </div>
         )}
         {started && countdown > 0 && <div className="ball-3d-overlay">{countdown}</div>}
-        {paused && <div className="ball-3d-overlay">Paused</div>}
+        {paused && (
+          <div className="ball-3d-overlay">
+            <div className="ball-3d-overlay__panel">
+              <h3>{pauseReason === "tracking" ? "Hand Not Visible" : "Paused"}</h3>
+              {pauseReason === "tracking" ? (
+                <p>Move your hand back into the camera view, or switch to mouse movement.</p>
+              ) : null}
+              <div className="carrom-menu-actions">
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => {
+                    setPauseReason(null);
+                    setPaused(false);
+                  }}
+                >
+                  Resume
+                </button>
+                {pauseReason === "tracking" ? (
+                  <button type="button" className="secondary-button" onClick={toggleBallCameraPosition}>
+                    Play with Mouse
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <p className="game-feedback">{feedback}</p>
+      <p className="game-feedback">
+        {useCameraPosition
+          ? `${feedback} ${cameraLoading ? "Camera starting." : cameraError ? "Camera blocked; use mouse mode if needed." : camera.landmark ? "Hand visible." : "Show your hand to the camera."}`
+          : feedback}
+      </p>
     </>
+  );
+}
+
+function CameraPreview({
+  stream,
+  landmark,
+}: {
+  stream: MediaStream | null;
+  landmark: { x: number; y: number } | null;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+    return () => { video.srcObject = null; };
+  }, [stream]);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 12,
+        right: 12,
+        width: 200,
+        height: 150,
+        borderRadius: 10,
+        overflow: "hidden",
+        border: "2px solid rgba(255,255,255,0.35)",
+        background: "#000",
+        zIndex: 20,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+      }}
+    >
+      {/* Mirror the video so it feels natural (selfie mode) */}
+      <video
+        ref={videoRef}
+        muted
+        playsInline
+        style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)", display: "block" }}
+      />
+      {landmark && (
+        <div
+          style={{
+            position: "absolute",
+            // Mirror X to match the mirrored video display
+            left: `${(1 - landmark.x) * 100}%`,
+            top: `${landmark.y * 100}%`,
+            transform: "translate(-50%, -50%)",
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            background: "#00ff88",
+            border: "2px solid #fff",
+            boxShadow: "0 0 6px #00ff88",
+            pointerEvents: "none",
+          }}
+        />
+      )}
+      <span
+        style={{
+          position: "absolute",
+          bottom: 5,
+          left: 7,
+          fontSize: 10,
+          color: "rgba(255,255,255,0.75)",
+          background: "rgba(0,0,0,0.45)",
+          padding: "1px 5px",
+          borderRadius: 3,
+          pointerEvents: "none",
+        }}
+      >
+        Camera
+      </span>
+    </div>
   );
 }
 
@@ -1175,11 +1416,11 @@ const emptyFingerCounts = (): Record<FingerName, number> => ({
 /** One-hand C-major pentatonic layout (thumb → pinky) for UI labels — matches ebony stagger on the keyboard */
 const PIANO_WHITE_KEY_NOTES = ["C", "D", "E", "F", "G"] as const;
 
-function FingerTapPianoGame({ assignment, onComplete }: GameProps) {
+function FingerTapPianoGame({ assignment, accessibilityMode = false, onComplete }: GameProps) {
   if (assignment.config.difficulty === "hard") {
     return <FingerTapPianoLanesGame assignment={assignment} onComplete={onComplete} />;
   }
-  return <FingerTapPianoClassicGame assignment={assignment} onComplete={onComplete} />;
+  return <FingerTapPianoClassicGame assignment={assignment} accessibilityMode={accessibilityMode} onComplete={onComplete} />;
 }
 
 function FingerTapPianoClassicGame({ assignment, onComplete }: GameProps) {
@@ -1977,210 +2218,178 @@ function FingerTapPianoClassicGame({ assignment, onComplete }: GameProps) {
     );
 }
 
-const BUBBLE_SLOT_COORDS = [
-  { x: 22, y: 26 },
-  { x: 52, y: 20 },
-  { x: 78, y: 26 },
-  { x: 26, y: 52 },
-  { x: 50, y: 56 },
-  { x: 74, y: 52 }
-];
+const BUBBLE_POP_REPLACE_MS = 450;
+const BUBBLE_POP_MOVE_TICK_MS = 110;
+const BUBBLE_POP_CAMERA_TICK_MS = 50;
+const BUBBLE_POP_CURSOR_SMOOTHING = 0.34;
 
-/** Min distance between bubble centers (% of board w/h — same coords as gameplay). Keeps taps distinct. */
-const MIN_BUBBLE_CENTER_DIST = 17;
-
-/** Permute slots by seed so layouts vary without heavy overlap */
-function bubbleSlotsForSeed(seed: number): typeof BUBBLE_SLOT_COORDS {
-  const order = [0, 1, 2, 3, 4, 5];
-  let s = Math.max(1, seed) * 73856093;
-  for (let i = order.length - 1; i > 0; i--) {
-    s = (s * 48271 + 65521) >>> 0;
-    const j = s % (i + 1);
-    [order[i], order[j]] = [order[j], order[i]];
-  }
-  return order.map((slotIdx) => BUBBLE_SLOT_COORDS[slotIdx]);
-}
-
-function jitteredBubblePoint(seed: number, slot: Point, index: number, margin: number): Point {
-  const jx = (((seed << 3) + index * 47) % 1000) / 1000;
-  const jy = (((seed * 11 + index * 71) % 1000) / 1000 - 0.5) * 3.2;
-  return {
-    x: clamp(slot.x + (jx - 0.5) * 3.2, margin, 100 - margin),
-    y: clamp(slot.y + jy, margin, 100 - margin)
-  };
-}
-
-function pairwiseMinDistOk(candidate: Point, placed: readonly Point[]): boolean {
-  return placed.every((q) => distance(candidate, q) >= MIN_BUBBLE_CENTER_DIST);
-}
-
-/** Fallback: fixed anchors only (pairwise ≥ ~24 with this grid). */
-function rawSlotCenters(seed: number, margin: number): Point[] {
-  return bubbleSlotsForSeed(seed).map((slot) => ({
-    x: clamp(slot.x, margin, 100 - margin),
-    y: clamp(slot.y, margin, 100 - margin)
-  }));
-}
-
-/** Resample jitter until all six centers are separated, else use raw anchors. */
-function buildNonOverlappingLayout(seed: number, margin: number): Point[] {
-  for (let world = 0; world < 96; world++) {
-    const s = seed + world;
-    const slots = bubbleSlotsForSeed(s);
-    const pts: Point[] = [];
-    let bad = false;
-    for (let i = 0; i < 6; i++) {
-      let p = jitteredBubblePoint(s, slots[i], i, margin);
-      for (let guard = 0; guard < 56 && !pairwiseMinDistOk(p, pts); guard++) {
-        const angle = (((s * 131 + i * 17 + guard * 53) >>> 0) % 360) * (Math.PI / 180);
-        const step = 0.8 + (guard % 12) * 0.28;
-        p = {
-          x: clamp(p.x + Math.cos(angle) * step, margin, 100 - margin),
-          y: clamp(p.y + Math.sin(angle) * step, margin, 100 - margin)
-        };
-      }
-      if (!pairwiseMinDistOk(p, pts)) {
-        bad = true;
-        break;
-      }
-      pts.push(p);
-    }
-    if (!bad) return pts;
-  }
-  return rawSlotCenters(seed, margin);
-}
-
-function createBubblePopItem(seed: number, index: number, pos: Point) {
-  const scaleJit = clamp(0.94 + ((((seed + index * 29) % 97) / 97) * 0.13), 0.94, 1.06);
-  return {
-    id: `bubble-${seed}-${index}-${Math.round(pos.x * 100)}-${Math.round(pos.y * 100)}`,
-    x: pos.x,
-    y: pos.y,
-    target: index % 3 !== 1,
-    floatPhase: index % 6,
-    scaleJit
-  };
-}
-
-function makeBubbles(seed: number) {
-  const margin = 10;
-  const pts = buildNonOverlappingLayout(seed, margin);
-  return pts.map((pos, index) => createBubblePopItem(seed, index, pos));
-}
-
-/**
- * Spawn one bubble after another was removed; position must avoid existing centers.
- */
-function makeReplacementBubble(seed: number, existingCenters: Point[]) {
-  const margin = 10;
-
-  function bestAnchorFromSlots(): Point {
-    let pick: Point = { x: 50, y: 45 };
-    let best = -1;
-    for (const slot of BUBBLE_SLOT_COORDS) {
-      const c = { x: clamp(slot.x, margin, 100 - margin), y: clamp(slot.y, margin, 100 - margin) };
-      const d = existingCenters.length
-        ? Math.min(...existingCenters.map((e) => distance(c, e)))
-        : 99;
-      if (d > best) {
-        best = d;
-        pick = c;
-      }
-    }
-    return pick;
-  }
-
-  for (let world = 0; world < 128; world++) {
-    const s = seed + world;
-    const slots = bubbleSlotsForSeed(s);
-    for (let si = 0; si < 6; si++) {
-      for (let att = 0; att < 18; att++) {
-        const t = s + si * 59 + att * 11;
-        const p = jitteredBubblePoint(t, slots[si], si, margin);
-        if (pairwiseMinDistOk(p, existingCenters)) {
-          return createBubblePopItem(seed, 0, p);
-        }
-      }
-    }
-  }
-
-  let p = bestAnchorFromSlots();
-  for (let bump = 0; bump < 60 && !pairwiseMinDistOk(p, existingCenters); bump++) {
-    const ang = ((seed + bump * 29) % 360) * (Math.PI / 180);
-    const step = 1.2 + (bump % 7) * 0.45;
-    p = {
-      x: clamp(p.x + Math.cos(ang) * step, margin, 100 - margin),
-      y: clamp(p.y + Math.sin(ang) * step, margin, 100 - margin)
-    };
-  }
-
-  for (let iter = 0; iter < 40 && !pairwiseMinDistOk(p, existingCenters); iter++) {
-    const tooClose = existingCenters.filter((o) => distance(p, o) < MIN_BUBBLE_CENTER_DIST);
-    if (tooClose.length === 0) break;
-    for (const o of tooClose) {
-      const g = Math.max(distance(p, o), 1e-4);
-      const need = MIN_BUBBLE_CENTER_DIST - g + 0.55;
-      p = {
-        x: clamp(p.x + ((p.x - o.x) / g) * need, margin, 100 - margin),
-        y: clamp(p.y + ((p.y - o.y) / g) * need, margin, 100 - margin)
-      };
-    }
-  }
-
-  if (!pairwiseMinDistOk(p, existingCenters)) {
-    for (const slot of BUBBLE_SLOT_COORDS) {
-      const tryP = {
-        x: clamp(slot.x, margin, 100 - margin),
-        y: clamp(slot.y, margin, 100 - margin)
-      };
-      if (pairwiseMinDistOk(tryP, existingCenters)) {
-        return createBubblePopItem(seed, 0, tryP);
-      }
-    }
-  }
-
-  return createBubblePopItem(seed, 0, p);
-}
-
-function BubblePopGame({ assignment, onComplete }: GameProps) {
+function BubblePopGame({ assignment, accessibilityMode = false, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
   const processedEventRef = useRef("");
+  const seedRef = useRef(2);
+  const replacementTimersRef = useRef<number[]>([]);
+  const currentStreakRef = useRef(0);
+  const bestStreakRef = useRef(0);
+  const previousPopGestureRef = useRef<GestureName>("open");
+  const lastPopAttemptAtRef = useRef(0);
+  const lastCameraSeenAtRef = useRef(0);
+  const lastCameraPositionUpdateRef = useRef(0);
+  const lastCameraPositionRef = useRef<HandPosition | null>(null);
+  const bubbleCursorRef = useRef<HTMLDivElement | null>(null);
+  const bubbleCursorTargetRef = useRef<HandPosition>({ x: 24, y: 58, z: 0 });
+  const bubbleCursorCurrentRef = useRef<HandPosition>({ x: 24, y: 58, z: 0 });
+  const bubbleCursorRafRef = useRef<number>(0);
   const targetReps = assignment.config.targetReps;
   const initialTime = 50;
   const [phase, setPhase] = useState<"ready" | "playing" | "paused">("ready");
-  const [bubbles, setBubbles] = useState(() => makeBubbles(1));
-  const [seed, setSeed] = useState(2);
+  const [pauseReason, setPauseReason] = useState<"manual" | "tracking" | null>(null);
+  const [useCameraPosition, setUseCameraPosition] = useState(true);
+  const [bubbles, setBubbles] = useState<BubblePopItem3D[]>(() => makeBubblePop3DLayout(1, accessibilityMode));
   const [popped, setPopped] = useState(0);
   const [missed, setMissed] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
   const [timeLeft, setTimeLeft] = useState(initialTime);
-  const [tapFx, setTapFx] = useState<Partial<Record<string, "ok" | "bad">>>({});
+  const [bursts, setBursts] = useState<Array<{ id: string; x: number; z: number; kind: "ok" | "bad" }>>([]);
   const lastSuccessfulPopAtRef = useRef<number | null>(null);
   const popIntervalsRef = useRef<number[]>([]);
-  const popRadius = 10;
-  /** Half-diameter in normalized 0–100 coords; matches ~clamp(72px, 10vw, 120px) bubbles on typical boards */
-  const bubbleHitHalf = 7;
+
+  const bubbleBoardRef = useRef<HTMLDivElement | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+
+  const camera = useCameraTracking((lmX, lmY) => {
+    const bounds = bubbleBoardRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const now = performance.now();
+    const screenX = (1 - lmX) * window.innerWidth;
+    const screenY = lmY * window.innerHeight;
+    const nextPosition = {
+      x: Math.max(0, Math.min(100, ((screenX - bounds.left) / bounds.width) * 100)),
+      y: Math.max(0, Math.min(100, ((screenY - bounds.top) / bounds.height) * 100)),
+      z: 0,
+    };
+    bubbleCursorTargetRef.current = nextPosition;
+    const previous = lastCameraPositionRef.current;
+    const movedEnough = !previous || Math.hypot(nextPosition.x - previous.x, nextPosition.y - previous.y) >= 1.2;
+    if (!movedEnough || now - lastCameraPositionUpdateRef.current < BUBBLE_POP_CAMERA_TICK_MS) return;
+    lastCameraPositionRef.current = nextPosition;
+    lastCameraPositionUpdateRef.current = now;
+    input.setHandPosition(nextPosition);
+  });
+  const cameraActive = camera.isActive;
+  const cameraLoading = camera.isLoading;
+  const cameraError = camera.error;
+  const startBubbleCamera = camera.startCamera;
+  const stopBubbleCamera = camera.stopCamera;
 
   const progressPct = clamp((popped / Math.max(targetReps, 1)) * 100, 0, 100);
   const gameActive = phase === "playing";
+  const getBubbleAimPosition = useCallback(
+    () => useCameraPosition ? bubbleCursorCurrentRef.current : input.handPosition,
+    [input.handPosition, useCameraPosition]
+  );
+
+  useEffect(() => {
+    if (!useCameraPosition) return undefined;
+    bubbleCursorTargetRef.current = input.handPosition;
+    bubbleCursorCurrentRef.current = input.handPosition;
+
+    const tick = () => {
+      const cursor = bubbleCursorRef.current;
+      const target = bubbleCursorTargetRef.current;
+      const current = bubbleCursorCurrentRef.current;
+      const next = {
+        x: current.x + (target.x - current.x) * BUBBLE_POP_CURSOR_SMOOTHING,
+        y: current.y + (target.y - current.y) * BUBBLE_POP_CURSOR_SMOOTHING,
+        z: 0
+      };
+      bubbleCursorCurrentRef.current = next;
+      if (cursor) {
+        cursor.style.left = `${next.x}%`;
+        cursor.style.top = `${next.y}%`;
+      }
+      bubbleCursorRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    bubbleCursorRafRef.current = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(bubbleCursorRafRef.current);
+  }, [useCameraPosition]);
+
+  const clearReplacementTimers = useCallback(() => {
+    replacementTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    replacementTimersRef.current = [];
+  }, []);
 
   const resetRound = useCallback(() => {
+    clearReplacementTimers();
     processedEventRef.current = "";
     lastSuccessfulPopAtRef.current = null;
     popIntervalsRef.current = [];
-    setSeed(2);
-    setBubbles(makeBubbles(1));
+    currentStreakRef.current = 0;
+    bestStreakRef.current = 0;
+    seedRef.current = 2;
+    setBubbles(makeBubblePop3DLayout(1, accessibilityMode));
     setPopped(0);
     setMissed(0);
+    setStreak(0);
+    setBestStreak(0);
     setTimeLeft(initialTime);
-    setTapFx({});
-  }, [initialTime]);
+    setBursts([]);
+  }, [accessibilityMode, clearReplacementTimers, initialTime]);
 
   const startRound = useCallback(() => {
     resetRound();
+    setPauseReason(null);
     setPhase("playing");
   }, [resetRound]);
+
+  useEffect(() => () => clearReplacementTimers(), [clearReplacementTimers]);
+
+  useEffect(() => {
+    if (!useCameraPosition) {
+      if (cameraActive || cameraError) stopBubbleCamera();
+      return;
+    }
+    if (!cameraActive && !cameraLoading && !cameraError) {
+      void startBubbleCamera();
+    }
+  }, [cameraActive, cameraError, cameraLoading, startBubbleCamera, stopBubbleCamera, useCameraPosition]);
+
+  useEffect(() => {
+    if (camera.landmark) {
+      lastCameraSeenAtRef.current = Date.now();
+      if (phase === "paused" && pauseReason === "tracking") {
+        setPauseReason(null);
+        setPhase("playing");
+      }
+    }
+  }, [camera.landmark, pauseReason, phase]);
+
+  useEffect(() => {
+    if (!useCameraPosition || !camera.isActive || phase !== "playing") return undefined;
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastCameraSeenAtRef.current <= 900) return;
+      setPauseReason("tracking");
+      setPhase("paused");
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [camera.isActive, phase, useCameraPosition]);
+
+  const toggleCameraPosition = useCallback(() => {
+    setUseCameraPosition((enabled) => {
+      const next = !enabled;
+      if (next) {
+        lastCameraSeenAtRef.current = Date.now();
+      }
+      if (!next && pauseReason === "tracking") {
+        setPauseReason(null);
+        setPhase("playing");
+      }
+      return next;
+    });
+  }, [pauseReason]);
 
   const finishBubbleRound = useCallback(
     (nextPopped: number, nextMissed: number) => {
@@ -2198,6 +2407,8 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
         gameMetrics: {
           popped: nextPopped,
           wrongHits: nextMissed,
+          decoyHits: nextMissed,
+          bestStreak: bestStreakRef.current,
           timeLeft,
           averagePopIntervalMs,
           inputSource: input.rawConnected ? "glove" : "demo"
@@ -2207,25 +2418,104 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
     [finish, input.rawConnected, sessionEvents, timeLeft]
   );
 
-  const flashTap = useCallback((bubbleId: string, kind: "ok" | "bad") => {
-    setTapFx((prev) => ({ ...prev, [bubbleId]: kind }));
+  const scheduleBubbleReplacement = useCallback((bubble: BubblePopItem3D, kind: "ok" | "bad") => {
+    const poppedPoint = { x: bubble.x, z: bubble.z };
+    const cursorPoint = handPositionToBubbleWorld(getBubbleAimPosition());
+    const burstId = `${bubble.id}-${kind}-${Date.now()}`;
+    setBursts((items) => [...items, { id: burstId, x: bubble.x, z: bubble.z, kind }].slice(-10));
     window.setTimeout(() => {
-      setTapFx((prev) => {
-        const next = { ...prev };
-        delete next[bubbleId];
-        return next;
-      });
-    }, 380);
-  }, []);
+      setBursts((items) => items.filter((item) => item.id !== burstId));
+    }, 700);
 
-  const emitPinchFromBubble = useCallback(
-    (bubble: { id: string; x: number; y: number; target: boolean }) => {
-      if (!gameActive || input.rawConnected) return;
-      flashTap(bubble.id, bubble.target ? "ok" : "bad");
-      input.emitGesture("pinch", gestureTargets.pinch, { x: bubble.x, y: bubble.y, z: 0 });
-    },
-    [flashTap, gameActive, input]
-  );
+    setBubbles((items) =>
+      items.map((item) =>
+        item.id === bubble.id
+          ? { ...item, status: kind === "ok" ? "popping" : "bad", vx: 0, vz: 0 }
+          : item
+      )
+    );
+
+    const nextSeed = seedRef.current + 1;
+    seedRef.current = nextSeed;
+    const timer = window.setTimeout(() => {
+      setBubbles((items) => {
+        const rest = items.filter((item) => item.id !== bubble.id);
+        const activeCenters = rest
+          .filter((item) => item.status === "active")
+          .map(({ x, z }) => ({ x, z }));
+        const replacement = makeReplacementBubblePop3D(
+          nextSeed,
+          activeCenters,
+          { popped: poppedPoint, cursor: cursorPoint },
+          accessibilityMode
+        );
+        return [...rest, replacement];
+      });
+      replacementTimersRef.current = replacementTimersRef.current.filter((item) => item !== timer);
+    }, BUBBLE_POP_REPLACE_MS);
+    replacementTimersRef.current.push(timer);
+  }, [accessibilityMode, getBubbleAimPosition]);
+
+  const resolveBubblePop = useCallback((position: HandPosition) => {
+    const now = performance.now();
+    if (now - lastPopAttemptAtRef.current < 260) return false;
+    const board = bubbleBoardRef.current?.getBoundingClientRect();
+    if (!board) return false;
+    const nearest = bubbles
+      .filter((bubble) => bubble.status === "active")
+      .map((bubble) => ({
+        bubble,
+        score: bubblePopVisualHitScore(position, bubble, { width: board.width, height: board.height }, accessibilityMode)
+      }))
+      .filter(({ score }) => score <= 1)
+      .sort((a, b) => a.score - b.score)[0]?.bubble;
+    if (!nearest) return false;
+
+    lastPopAttemptAtRef.current = now;
+    scheduleBubbleReplacement(nearest, nearest.target ? "ok" : "bad");
+
+    if (nearest.target) {
+      const nextPopped = popped + 1;
+      const nextStreak = currentStreakRef.current + 1;
+      currentStreakRef.current = nextStreak;
+      bestStreakRef.current = Math.max(bestStreakRef.current, nextStreak);
+      setStreak(nextStreak);
+      setBestStreak(bestStreakRef.current);
+      const stamp = Date.now();
+      if (lastSuccessfulPopAtRef.current !== null) {
+        popIntervalsRef.current = [...popIntervalsRef.current, stamp - lastSuccessfulPopAtRef.current].slice(-40);
+      }
+      lastSuccessfulPopAtRef.current = stamp;
+      setPopped(nextPopped);
+      if (nextPopped >= targetReps) {
+        finishBubbleRound(nextPopped, missed);
+      }
+    } else {
+      currentStreakRef.current = 0;
+      setStreak(0);
+      setMissed((value) => value + 1);
+    }
+    return true;
+  }, [accessibilityMode, bubbles, finishBubbleRound, missed, popped, scheduleBubbleReplacement, targetReps]);
+
+  const emitPinchFromBubble = useCallback((bubble: BubblePopItem3D) => {
+    if (!gameActive || input.rawConnected || bubble.status !== "active") return;
+    const position = bubbleWorldToHandPosition(bubble);
+    input.setHandPosition(position);
+    input.emitGesture("pinch", gestureTargets.pinch, position);
+  }, [gameActive, input]);
+
+  useEffect(() => {
+    if (phase !== "playing") return undefined;
+    let last = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.08, Math.max(0.01, (now - last) / 1000));
+      last = now;
+      setBubbles((items) => moveBubblePopItems(items, dt, assignment.config.difficulty, accessibilityMode));
+    }, BUBBLE_POP_MOVE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [accessibilityMode, assignment.config.difficulty, phase]);
 
   useEffect(() => {
     if (phase !== "playing") return undefined;
@@ -2245,53 +2535,35 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
     if (!event || processedEventRef.current === event.id) return;
     if (event.gesture !== "pinch" && event.gesture !== "point") return;
     processedEventRef.current = event.id;
+    resolveBubblePop(getBubbleAimPosition());
+  }, [getBubbleAimPosition, input.events, phase, resolveBubblePop]);
 
-    const nearest = bubbles
-      .map((bubble) => ({ bubble, gap: distance(bubble, input.handPosition) }))
-      .filter(({ gap }) => gap <= bubbleHitHalf + popRadius)
-      .sort((a, b) => a.gap - b.gap)[0]?.bubble;
-    if (!nearest) return;
-
-    const nextSeed = seed + 1;
-    setSeed(nextSeed);
-    setBubbles((items) => {
-      const rest = items.filter((bubble) => bubble.id !== nearest.id);
-      const centers = rest.map(({ x, y }) => ({ x, y }));
-      const incoming = makeReplacementBubble(nextSeed, centers);
-      return [...rest, incoming];
-    });
-
-    if (nearest.target) {
-      const nextPopped = popped + 1;
-      const now = Date.now();
-      if (lastSuccessfulPopAtRef.current !== null) {
-        popIntervalsRef.current = [...popIntervalsRef.current, now - lastSuccessfulPopAtRef.current].slice(-40);
-      }
-      lastSuccessfulPopAtRef.current = now;
-      setPopped(nextPopped);
-      if (nextPopped >= targetReps) {
-        finishBubbleRound(nextPopped, missed);
-      }
-    } else {
-      setMissed((value) => value + 1);
+  useEffect(() => {
+    if (phase !== "playing") {
+      previousPopGestureRef.current = input.currentGesture;
+      return;
     }
-  }, [
-    bubbles,
-    finishBubbleRound,
-    input.events,
-    input.handPosition,
-    missed,
-    popRadius,
-    popped,
-    seed,
-    phase,
-    bubbleHitHalf,
-    targetReps
-  ]);
+    const current = input.currentGesture;
+    const previous = previousPopGestureRef.current;
+    previousPopGestureRef.current = current;
+    if ((current === "pinch" || current === "point") && previous !== current) {
+      resolveBubblePop(getBubbleAimPosition());
+    }
+  }, [getBubbleAimPosition, input.currentGesture, phase, resolveBubblePop]);
+
+  useEffect(() => {
+    if (phase !== "playing") return undefined;
+    if (input.currentGesture !== "pinch" && input.currentGesture !== "point") return undefined;
+    const timer = window.setInterval(() => {
+      resolveBubblePop(getBubbleAimPosition());
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [getBubbleAimPosition, input.currentGesture, phase, resolveBubblePop]);
 
   useEffect(() => {
     if (phase !== "playing") return undefined;
     const onKey = (event: KeyboardEvent) => {
+      if (useCameraPosition) return;
       const key = event.key.toLowerCase();
       const direction = {
         x: key === "arrowleft" || key === "a" ? -1 : key === "arrowright" || key === "d" ? 1 : 0,
@@ -2308,7 +2580,19 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [input, phase]);
+  }, [accessibilityMode, input, phase, useCameraPosition]);
+
+  useEffect(() => {
+    if (input.rawConnected) return undefined;
+    const onSpaceKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" && e.code !== "Enter") return;
+      e.preventDefault();
+      if (phase !== "playing") return;
+      input.emitGesture("point", gestureTargets.point, input.handPosition);
+    };
+    window.addEventListener("keydown", onSpaceKey);
+    return () => window.removeEventListener("keydown", onSpaceKey);
+  }, [input, input.rawConnected, phase]);
 
   return (
     <section className="bubble-pop-shell" aria-label="Bubble Pop game">
@@ -2343,17 +2627,52 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
             {phase === "ready" ? (
               <button type="button" className="primary-button compact-game-button" onClick={startRound}>Start</button>
             ) : (
-              <button type="button" className="secondary-button compact-game-button" onClick={() => setPhase((value) => value === "paused" ? "playing" : "paused")}>
+              <button
+                type="button"
+                className="secondary-button compact-game-button"
+                onClick={() => {
+                  setPhase((value) => {
+                    const next = value === "paused" ? "playing" : "paused";
+                    setPauseReason(next === "paused" ? "manual" : null);
+                    return next;
+                  });
+                }}
+              >
                 {phase === "paused" ? "Resume" : "Pause"}
               </button>
             )}
             <button type="button" className="secondary-button compact-game-button" onClick={startRound}>Restart</button>
             <button type="button" className="danger-button compact-game-button" disabled={phase === "ready"} onClick={() => finishBubbleRound(popped, missed)}>End</button>
+            <button
+              type="button"
+              className={useCameraPosition ? "primary-button compact-game-button" : "secondary-button compact-game-button"}
+              onClick={toggleCameraPosition}
+              disabled={camera.isLoading}
+              title={useCameraPosition ? "Switch to mouse movement" : "Use webcam hand tracking for movement"}
+            >
+              {useCameraPosition ? <VideoOff size={15} /> : <Video size={15} />}
+              {camera.isLoading ? "Starting…" : useCameraPosition ? "Use Mouse" : "Use Camera"}
+            </button>
+            {useCameraPosition && camera.isActive && (
+              <button
+                type="button"
+                className={showPreview ? "primary-button compact-game-button" : "secondary-button compact-game-button"}
+                onClick={() => setShowPreview((v) => !v)}
+              >
+                {showPreview ? "Hide View" : "Show View"}
+              </button>
+            )}
           </div>
         </div>
         <div className="bubble-pop-meta-chips">
-          <span className="bubble-meta-chip">Crosshair aim · pinch or tap confirms</span>
+          <span className="bubble-meta-chip">{useCameraPosition ? "Camera moves crosshair" : "Mouse moves crosshair"}</span>
           <span className="bubble-meta-chip">{gestureLabels[input.currentGesture]} focus</span>
+          {useCameraPosition ? (
+            <span className={`bubble-meta-chip ${camera.landmark ? "bubble-meta-chip--ok" : "bubble-meta-chip--warn"}`}>
+              {camera.isLoading ? "Camera loading" : camera.error ? "Camera blocked" : camera.landmark ? "Hand visible" : "Show hand to camera"}
+            </span>
+          ) : null}
+          <span className="bubble-meta-chip">Streak {streak} · Best {bestStreak}</span>
         </div>
         <div
           className="bubble-pop-progress"
@@ -2368,9 +2687,10 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
       </header>
 
       <div
+        ref={bubbleBoardRef}
         className="bubble-pop-scene bubble-board game-board"
         onPointerMove={(event) => {
-          if (phase !== "playing") return;
+          if (phase !== "playing" || useCameraPosition) return;
           const bounds = event.currentTarget.getBoundingClientRect();
           input.setHandPosition({
             x: ((event.clientX - bounds.left) / bounds.width) * 100,
@@ -2405,39 +2725,39 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
           ))}
         </div>
 
-        <div className="bubble-pop-depth-grid" aria-hidden />
-
-        <div className="bubble-pop-surface" aria-hidden>
+        <div className="bubble-pop-depth-grid bubble-pop-depth-grid--stage" aria-hidden />
+        <div className="bubble-pop-surface bubble-pop-surface--stage" aria-hidden>
           <svg className="bubble-pop-surface__wave" viewBox="0 0 480 72" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
-              <linearGradient id="bubblePopRippleTone" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor="rgba(186,230,253,0.38)" />
-                <stop offset="100%" stopColor="rgba(191,219,254,0.16)" />
+              <linearGradient id="bubblePopRippleToneLive" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="rgba(186,230,253,0.42)" />
+                <stop offset="100%" stopColor="rgba(191,219,254,0.18)" />
               </linearGradient>
             </defs>
             <path
               d="M0 54 C76 72 154 42 238 54 C324 67 394 42 478 62 L478 144 L0 144 Z"
-              fill="url(#bubblePopRippleTone)"
+              fill="url(#bubblePopRippleToneLive)"
               opacity="0.9"
             />
-            <path d="M0 52 C118 74 258 42 478 62" stroke="rgba(148,163,184,0.42)" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+            <path d="M0 52 C118 74 258 42 478 62" stroke="rgba(96,165,250,0.45)" strokeWidth="1.4" fill="none" strokeLinecap="round" />
           </svg>
         </div>
 
-        <div className="bubble-pop-bubbles-layer">
+        <div className="bubble-pop-bubbles-layer bubble-pop-bubbles-layer--stage">
           {bubbles.map((bubble) => {
-            const fx = tapFx[bubble.id];
+            const point = bubbleWorldToHandPosition(bubble);
             return (
               <button
                 key={bubble.id}
                 type="button"
-                className={`bubble-pop-hit ${bubble.target ? "bubble-pop-hit--target" : "bubble-pop-hit--decoy"}${fx === "ok" ? " bubble-pop-hit--fx-ok" : ""}${fx === "bad" ? " bubble-pop-hit--fx-bad" : ""}`}
+                className={`bubble-pop-hit ${bubble.target ? "bubble-pop-hit--target" : "bubble-pop-hit--decoy"} bubble-pop-hit--${bubble.status}`}
                 style={
                   {
-                    left: `${bubble.x}%`,
-                    top: `${bubble.y}%`,
+                    left: `${point.x}%`,
+                    top: `${point.y}%`,
                     ["--bubble-float-delay" as string]: `${bubble.floatPhase * -0.32}s`,
-                    ["--bubble-scale" as string]: String(bubble.scaleJit)
+                    ["--bubble-scale" as string]: String(bubble.scaleJit),
+                    ["--bubble-depth" as string]: String(bubble.depth)
                   } as CSSProperties
                 }
                 onClick={(e) => {
@@ -2446,13 +2766,13 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
                 }}
               >
                 <span className="bubble-pop-hit__shell" aria-hidden />
-                <span className={`bubble-pop-sparkfx${fx === "ok" ? " is-on" : ""}`} aria-hidden />
+                <span className={`bubble-pop-sparkfx${bubble.status === "popping" ? " is-on" : ""}`} aria-hidden />
                 <span className="bubble-pop-hit__content">
                   <span className={`bubble-pop-hit__lbl${bubble.target ? "" : " bubble-pop-hit__lbl--decoy"}`} aria-hidden>
                     {bubble.target ? "Pop" : "Avoid"}
                   </span>
                   <span className="bubble-pop-visually-hidden">
-                    {bubble.target ? "Correct glowing bubble — pop this target" : "Coral-styled decoy — do not tap"}
+                    {bubble.target ? "Correct glowing bubble - pop this target" : "Coral-styled decoy - do not tap"}
                   </span>
                 </span>
               </button>
@@ -2460,7 +2780,24 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
           })}
         </div>
 
-        <BubblePopAimCursor position={input.handPosition} gesture={input.currentGesture} />
+        {bursts.map((burst) => {
+          const point = bubbleWorldToHandPosition(burst);
+          return (
+            <span
+              key={burst.id}
+              className={`bubble-pop-burst bubble-pop-burst--${burst.kind}`}
+              style={{ left: `${point.x}%`, top: `${point.y}%` }}
+              aria-hidden
+            />
+          );
+        })}
+        <BubblePopAimCursor
+          position={input.handPosition}
+          gesture={input.currentGesture}
+          cursorRef={bubbleCursorRef}
+          directControl={useCameraPosition}
+          accessible={accessibilityMode}
+        />
         {phase === "ready" && (
           <div className="bubble-pop-overlay">
             <div>
@@ -2473,17 +2810,237 @@ function BubblePopGame({ assignment, onComplete }: GameProps) {
         {phase === "paused" && (
           <div className="bubble-pop-overlay">
             <div>
-              <h3>Paused</h3>
-              <button type="button" className="primary-button" onClick={() => setPhase("playing")}>Resume</button>
+              <h3>{pauseReason === "tracking" ? "Hand Not Visible" : "Paused"}</h3>
+              {pauseReason === "tracking" ? (
+                <p>Move your hand back into the camera view, or switch to mouse movement.</p>
+              ) : null}
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  setPauseReason(null);
+                  setPhase("playing");
+                }}
+              >
+                Resume
+              </button>
+              {pauseReason === "tracking" ? (
+                <button type="button" className="secondary-button" onClick={toggleCameraPosition}>
+                  Play with Mouse
+                </button>
+              ) : null}
             </div>
           </div>
+        )}
+        {useCameraPosition && camera.isActive && showPreview && (
+          <CameraPreview stream={camera.stream} landmark={camera.landmark} />
         )}
       </div>
 
       <p className="bubble-pop-hint-chip" role="note">
-        Aim crosshair · pinch or tap glowing targets — coral = decoys.
+        {useCameraPosition ? "Camera movement is on by default. Show your hand to move, then pinch or point with the glove to pop." : "Mouse movement is on. Aim crosshair · pinch, point, or tap glowing bubbles — coral = decoys."}
       </p>
     </section>
+  );
+}
+
+function BubblePop3DScene({
+  accessibilityMode,
+  bubbles,
+  bursts,
+  cursor,
+  cursorRadius,
+  gesture,
+  onBubbleSelect
+}: {
+  accessibilityMode: boolean;
+  bubbles: BubblePopItem3D[];
+  bursts: Array<{ id: string; x: number; z: number; kind: "ok" | "bad" }>;
+  cursor: { x: number; z: number };
+  cursorRadius: number;
+  gesture: GestureName;
+  onBubbleSelect: (bubble: BubblePopItem3D) => void;
+}) {
+  return (
+    <>
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0]}>
+        <planeGeometry args={[9.2, 5.8, 1, 1]} />
+        <meshStandardMaterial color="#dbeafe" roughness={0.72} metalness={0.02} />
+      </mesh>
+      <Grid
+        args={[9.2, 5.8]}
+        cellSize={0.46}
+        cellThickness={0.45}
+        sectionSize={2.3}
+        sectionThickness={0.9}
+        fadeDistance={8}
+        fadeStrength={1.2}
+        position={[0, 0.012, 0]}
+      />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[2.15, 2.22, 96]} />
+        <meshBasicMaterial color="#93c5fd" transparent opacity={0.28} side={DoubleSide} />
+      </mesh>
+      {bubbles.map((bubble) => (
+        <BubblePop3DBubble
+          key={bubble.id}
+          bubble={bubble}
+          accessibilityMode={accessibilityMode}
+          onSelect={onBubbleSelect}
+        />
+      ))}
+      {bursts.map((burst) => (
+        <BubblePopBurst key={burst.id} burst={burst} />
+      ))}
+      <BubblePopCursor3D cursor={cursor} radius={cursorRadius} gesture={gesture} />
+      <ContactShadows position={[0, -0.01, 0]} opacity={0.22} scale={8.4} blur={2.4} far={2.8} />
+    </>
+  );
+}
+
+function BubblePop3DBubble({
+  bubble,
+  accessibilityMode,
+  onSelect
+}: {
+  bubble: BubblePopItem3D;
+  accessibilityMode: boolean;
+  onSelect: (bubble: BubblePopItem3D) => void;
+}) {
+  const groupRef = useRef<Group>(null);
+  const statusStartedAtRef = useRef(performance.now());
+
+  useEffect(() => {
+    statusStartedAtRef.current = performance.now();
+  }, [bubble.status]);
+
+  useFrame(({ clock }) => {
+    const group = groupRef.current;
+    if (!group) return;
+    const age = (performance.now() - statusStartedAtRef.current) / BUBBLE_POP_REPLACE_MS;
+    const bob = Math.sin(clock.elapsedTime * 1.35 + bubble.floatPhase) * (accessibilityMode ? 0.055 : 0.085);
+    const activeScale = bubble.scaleJit * (1 + Math.sin(clock.elapsedTime * 1.8 + bubble.floatPhase) * 0.025);
+    const statusScale = bubble.status === "popping"
+      ? 1 + Math.min(age, 1) * 0.85
+      : bubble.status === "bad"
+        ? 1 + Math.sin(Math.min(age, 1) * Math.PI * 5) * 0.08
+        : 1;
+    group.position.set(bubble.x, bubble.radius + bubble.depth + bob, bubble.z);
+    group.scale.setScalar(activeScale * statusScale);
+    group.rotation.y = Math.sin(clock.elapsedTime * 0.5 + bubble.floatPhase) * 0.14;
+  });
+
+  const targetColor = bubble.target ? "#38bdf8" : "#fb7185";
+  const glowColor = bubble.target ? "#bae6fd" : "#fecdd3";
+  const opacity = bubble.status === "popping" ? 0.34 : 0.82;
+
+  return (
+    <group ref={groupRef}>
+      <mesh
+        castShadow
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(bubble);
+        }}
+      >
+        <sphereGeometry args={[bubble.radius, 36, 20]} />
+        <meshPhysicalMaterial
+          color={targetColor}
+          emissive={bubble.status === "bad" ? "#7f1d1d" : bubble.target ? "#075985" : "#9f1239"}
+          emissiveIntensity={bubble.status === "active" ? 0.12 : 0.45}
+          roughness={0.18}
+          metalness={0.02}
+          transparent
+          opacity={opacity}
+        />
+      </mesh>
+      <mesh scale={1.12}>
+        <sphereGeometry args={[bubble.radius, 36, 16]} />
+        <meshBasicMaterial color={glowColor} transparent opacity={bubble.status === "active" ? 0.16 : 0.32} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, -bubble.radius * 0.82, 0]}>
+        <torusGeometry args={[bubble.radius * 0.78, 0.018, 8, 64]} />
+        <meshBasicMaterial color={bubble.target ? "#0ea5e9" : "#e11d48"} transparent opacity={0.55} />
+      </mesh>
+    </group>
+  );
+}
+
+function BubblePopCursor3D({
+  cursor,
+  radius,
+  gesture
+}: {
+  cursor: { x: number; z: number };
+  radius: number;
+  gesture: GestureName;
+}) {
+  const ref = useRef<Group>(null);
+  const color = gesture === "pinch" ? "#10b981" : gesture === "point" ? "#6366f1" : "#0ea5e9";
+
+  useFrame(({ clock }) => {
+    const group = ref.current;
+    if (!group) return;
+    const pulse = 1 + Math.sin(clock.elapsedTime * 4.2) * 0.035;
+    group.position.set(cursor.x, 0.07, cursor.z);
+    group.scale.setScalar(pulse);
+  });
+
+  return (
+    <group ref={ref}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[radius, 0.035, 8, 80]} />
+        <meshBasicMaterial color={color} transparent opacity={0.78} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[radius * 0.22, radius * 0.28, 40]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0.9} side={DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0.025, 0]}>
+        <sphereGeometry args={[0.075, 18, 12]} />
+        <meshBasicMaterial color={color} />
+      </mesh>
+    </group>
+  );
+}
+
+function BubblePopBurst({ burst }: { burst: { x: number; z: number; kind: "ok" | "bad" } }) {
+  const groupRef = useRef<Group>(null);
+  const startedAtRef = useRef(performance.now());
+  const particles = useMemo(
+    () => Array.from({ length: 14 }, (_, index) => {
+      const angle = (index / 14) * Math.PI * 2;
+      const distance = 0.24 + (index % 4) * 0.08;
+      return {
+        x: Math.cos(angle) * distance,
+        z: Math.sin(angle) * distance,
+        y: 0.18 + (index % 3) * 0.045
+      };
+    }),
+    []
+  );
+
+  useFrame(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const progress = Math.min(1, (performance.now() - startedAtRef.current) / 650);
+    group.position.set(burst.x, 0.52 + progress * 0.28, burst.z);
+    group.scale.setScalar(1 + progress * 1.65);
+  });
+
+  return (
+    <group ref={groupRef}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.32, 0.35, 64]} />
+        <meshBasicMaterial color={burst.kind === "ok" ? "#7dd3fc" : "#fb7185"} transparent opacity={0.58} side={DoubleSide} />
+      </mesh>
+      {particles.map((particle, index) => (
+        <mesh key={index} position={[particle.x, particle.y, particle.z]}>
+          <sphereGeometry args={[0.045, 10, 8]} />
+          <meshBasicMaterial color={burst.kind === "ok" ? "#e0f2fe" : "#fecdd3"} transparent opacity={0.82} />
+        </mesh>
+      ))}
+    </group>
   );
 }
 
@@ -2491,6 +3048,7 @@ type CarromStage = "start" | "playing" | "ended";
 type CarromPlayer = "player" | "ai";
 type CarromCoin = "white" | "black" | "queen" | "striker";
 type CarromDragMode = "place" | "aim" | null;
+type CarromCameraPhase = "place" | "placement-locked" | "aim" | "direction-locked" | "armed";
 type CarromPiece = {
   id: string;
   coin: CarromCoin;
@@ -2506,6 +3064,12 @@ type CarromPiece = {
   touchedCoinType?: CarromCoin;
 };
 type CarromAim = { angle: number; power: number };
+type CarromFlickFinger = "index" | "middle";
+type CarromFingerFlickState = Record<CarromFlickFinger, {
+  bent: boolean;
+  startedAtMs: number;
+  peakBend: number;
+}>;
 type QueenState = { status: "available" | "pending" | "covered"; holder?: CarromPlayer };
 type ShotResult = {
   nextPieces: CarromPiece[];
@@ -2899,7 +3463,7 @@ function resolveCarromShot(
   };
 }
 
-function CarromGame({ assignment, onComplete }: GameProps) {
+function CarromGame({ assignment, accessibilityMode, calibration, onComplete }: GameProps) {
   const input = usePatientInput();
   const sessionEvents = useGameEvents();
   const finish = useCompletion(onComplete);
@@ -2945,7 +3509,52 @@ function CarromGame({ assignment, onComplete }: GameProps) {
     timeToAimSumSec: number;
     restPauseSumSec: number;
   }>({ shots: 0, aimJitterSum: 0, forceControlSum: 0, timeToAimSumSec: 0, restPauseSumSec: 0 });
+  const lastCameraShotAtRef = useRef(0);
+  const carromFlickMetricAggRef = useRef<{
+    shots: number;
+    flickSpeedSum: number;
+    bestFlickSpeed: number;
+    controlledFlicks: number;
+  }>({ shots: 0, flickSpeedSum: 0, bestFlickSpeed: 0, controlledFlicks: 0 });
+  const carromFingerFlickRef = useRef<CarromFingerFlickState>({
+    index: { bent: false, startedAtMs: 0, peakBend: 0 },
+    middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+  });
+  const carromLockedAimRef = useRef<CarromAim | null>(null);
+  const carromPhaseReadyAtRef = useRef(0);
+  const flickArmReadyRef = useRef(false);
+  const shotArmedAtRef = useRef(0);
+  const lastCameraSeenAtRef = useRef(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [cameraPhase, setCameraPhase] = useState<CarromCameraPhase>("place");
+  const [useCameraPosition, setUseCameraPosition] = useState(true);
+  const [pausedForTracking, setPausedForTracking] = useState(false);
+  const [showCarromPreview, setShowCarromPreview] = useState(false);
+  const [flickPowerPreview, setFlickPowerPreview] = useState(0);
+  const [flickSpeedPreview, setFlickSpeedPreview] = useState(0);
+  const [shotDirectionLocked, setShotDirectionLocked] = useState(false);
+  const prevCamGestureRef = useRef<GestureName>("open");
+  const carromFlickProfile = calibration?.carromFlickProfile;
+
+  const camera = useCameraTracking((lmX, lmY) => {
+    const bounds = boardRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const screenX = (1 - lmX) * window.innerWidth;
+    const screenY = lmY * window.innerHeight;
+    const handPctX = Math.max(0, Math.min(100, ((screenX - bounds.left) / bounds.width) * 100));
+    const handPctY = Math.max(0, Math.min(100, ((screenY - bounds.top) / bounds.height) * 100));
+    input.setHandPosition({
+      x: handPctX,
+      y: handPctY,
+      z: 0,
+    });
+  });
+  const cameraActive = camera.isActive;
+  const cameraLoading = camera.isLoading;
+  const cameraError = camera.error;
+  const startCarromCamera = camera.startCamera;
+  const stopCarromCamera = camera.stopCamera;
+
   const isMoving = piecesAreMoving(pieces);
   const pausedForFullscreen = stage === "playing" && !isFullscreen;
   const striker = pieces.find((piece) => piece.coin === "striker") ?? pieces[0];
@@ -2953,6 +3562,65 @@ function CarromGame({ assignment, onComplete }: GameProps) {
   const aiPocketed = pieces.filter((piece) => piece.coin === aiCoin && piece.pocketed).length;
   const playerRemaining = 9 - playerPocketed;
   const aiRemaining = 9 - aiPocketed;
+  const canInteract = stage === "playing" && turn === "player" && !isMoving && !pausedForFullscreen && !pausedForTracking;
+
+  useEffect(() => {
+    if (!useCameraPosition) {
+      if (cameraActive || cameraError) stopCarromCamera();
+      return;
+    }
+    if (!cameraActive && !cameraLoading && !cameraError) {
+      void startCarromCamera();
+    }
+  }, [cameraActive, cameraError, cameraLoading, startCarromCamera, stopCarromCamera, useCameraPosition]);
+
+  useEffect(() => {
+    if (!camera.landmark) return;
+    lastCameraSeenAtRef.current = Date.now();
+    if (pausedForTracking) {
+      setPausedForTracking(false);
+      setMessage(cameraPhase === "place" ? "Camera: open hand slides striker · make fist to lock" : "Camera tracking restored. Follow the coach step.");
+    }
+  }, [camera.landmark, cameraPhase, pausedForTracking]);
+
+  useEffect(() => {
+    const needsPlayerHand = useCameraPosition && cameraActive && stage === "playing" && turn === "player" && !isMoving && !pausedForFullscreen && !pausedForTracking;
+    if (!needsPlayerHand) return undefined;
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastCameraSeenAtRef.current <= 900) return;
+      setPausedForTracking(true);
+      setMessage("Paused. Show your hand to the camera or switch to mouse movement.");
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [cameraActive, isMoving, pausedForFullscreen, pausedForTracking, stage, turn, useCameraPosition]);
+
+  const toggleCarromCameraPosition = useCallback(() => {
+    setUseCameraPosition((enabled) => {
+      const next = !enabled;
+      if (next) {
+        lastCameraSeenAtRef.current = Date.now();
+        carromLockedAimRef.current = null;
+        carromPhaseReadyAtRef.current = 0;
+        flickArmReadyRef.current = false;
+        shotArmedAtRef.current = 0;
+        setShotDirectionLocked(false);
+        setFlickPowerPreview(0);
+        setMessage("Camera movement enabled. Show your hand to control the striker.");
+      } else {
+        if (pausedForTracking) setPausedForTracking(false);
+        setCameraPhase("place");
+        carromLockedAimRef.current = null;
+        carromPhaseReadyAtRef.current = 0;
+        flickArmReadyRef.current = false;
+        shotArmedAtRef.current = 0;
+        setShotDirectionLocked(false);
+        setFlickPowerPreview(0);
+        setFlickSpeedPreview(0);
+        setMessage("Mouse movement enabled. Drag the striker and release to shoot.");
+      }
+      return next;
+    });
+  }, [pausedForTracking]);
 
   useEffect(() => {
     piecesRef.current = pieces;
@@ -3009,13 +3677,31 @@ function CarromGame({ assignment, onComplete }: GameProps) {
     setAiFouls(0);
     setMisses(0);
     setWinner(null);
+    setPausedForTracking(false);
+    setCameraPhase("place");
+    prevCamGestureRef.current = "open";
+    carromLockedAimRef.current = null;
+    carromPhaseReadyAtRef.current = 0;
+    flickArmReadyRef.current = false;
+    shotArmedAtRef.current = 0;
+    setShotDirectionLocked(false);
+    carromFingerFlickRef.current = {
+      index: { bent: false, startedAtMs: 0, peakBend: 0 },
+      middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+    };
+    lastCameraShotAtRef.current = 0;
+    setFlickPowerPreview(0);
+    setFlickSpeedPreview(0);
     lastAiShotSignatureRef.current = null;
     lastPlayerShotAtRef.current = null;
     aimSamplingRef.current = null;
     carromMetricAggRef.current = { shots: 0, aimJitterSum: 0, forceControlSum: 0, timeToAimSumSec: 0, restPauseSumSec: 0 };
+    carromFlickMetricAggRef.current = { shots: 0, flickSpeedSum: 0, bestFlickSpeed: 0, controlledFlicks: 0 };
     setMessage(fullscreenStarted
       ? starter === "player"
-        ? "You won the break. Place striker on your baseline, then drag-release to shoot."
+        ? useCameraPosition
+          ? "You won the break. Camera: open hand slides striker · make fist to aim."
+          : "You won the break. Place striker on your baseline, then drag-release to shoot."
         : "AI won the break and will shoot from its baseline."
       : "Paused. Enter fullscreen to play.");
     shotOwnerRef.current = starter;
@@ -3238,6 +3924,44 @@ function CarromGame({ assignment, onComplete }: GameProps) {
     return shouldLock;
   };
 
+  const placeStrikerFromCamera = useCallback((boardX: number) => {
+    const x = clamp(boardX, carromBoard.baselineMinX, carromBoard.baselineMaxX);
+    setPieces((current) =>
+      current.map((p) =>
+        p.coin === "striker"
+          ? { ...p, x, y: carromBoard.strikerY, vx: 0, vy: 0, pocketed: false, fouled: false, touchedCoin: false }
+          : p
+      )
+    );
+  }, []);
+
+  const recordAimMetrics = useCallback(() => {
+    const sampling = aimSamplingRef.current;
+    if (!sampling?.active) return;
+    const nowMs = performance.now();
+    const timeToAimSec = (nowMs - sampling.startedAtMs) / 1000;
+    const angleArr = sampling.angles;
+    const powerArr = sampling.powers;
+    const mean = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / Math.max(arr.length, 1);
+    const stdDev = (arr: number[]) => {
+      if (arr.length < 2) return 0;
+      const m = mean(arr);
+      const variance = arr.reduce((s, v) => s + (v - m) * (v - m), 0) / arr.length;
+      return Math.sqrt(variance);
+    };
+    const angleStd = stdDev(angleArr);
+    const powerMean = mean(powerArr);
+    const powerStd = stdDev(powerArr);
+    const pullConsistency = clamp(1 - powerStd / Math.max(powerMean, 1e-6), 0, 1);
+    const restPauseSec = lastPlayerShotAtRef.current === null ? 0 : (nowMs - lastPlayerShotAtRef.current) / 1000;
+    carromMetricAggRef.current.shots += 1;
+    carromMetricAggRef.current.aimJitterSum += angleStd;
+    carromMetricAggRef.current.forceControlSum += pullConsistency;
+    carromMetricAggRef.current.timeToAimSumSec += timeToAimSec;
+    carromMetricAggRef.current.restPauseSumSec += restPauseSec;
+    aimSamplingRef.current = null;
+  }, []);
+
   useEffect(() => {
     const onFullscreenChange = () => {
       const active = document.fullscreenElement === boardRef.current;
@@ -3339,11 +4063,15 @@ function CarromGame({ assignment, onComplete }: GameProps) {
 
   useEffect(() => {
     const event = input.events[0];
+    if (event && useCameraPosition && event.gesture === "flick") {
+      processedEventRef.current = event.id;
+    }
     if (
       stage !== "playing"
       || turn !== "player"
       || isMoving
       || pausedForFullscreen
+      || useCameraPosition
       || !event
       || processedEventRef.current === event.id
       || event.gesture !== "flick"
@@ -3351,7 +4079,7 @@ function CarromGame({ assignment, onComplete }: GameProps) {
     ) return;
     processedEventRef.current = event.id;
     shoot("player", aim);
-  }, [aim, input.events, isMoving, pausedForFullscreen, shoot, stage, turn]);
+  }, [aim, input.events, isMoving, pausedForFullscreen, shoot, stage, turn, useCameraPosition]);
 
   useEffect(() => {
     const previous = previousCarromGestureRef.current;
@@ -3362,12 +4090,283 @@ function CarromGame({ assignment, onComplete }: GameProps) {
       || turn !== "player"
       || isMoving
       || pausedForFullscreen
+      || useCameraPosition
       || !playerStrikerPlaced
       || previous !== "fist"
       || current !== "open"
     ) return;
     shoot("player", aim);
-  }, [aim, input.currentGesture, isMoving, pausedForFullscreen, playerStrikerPlaced, shoot, stage, turn]);
+  }, [aim, input.currentGesture, isMoving, pausedForFullscreen, playerStrikerPlaced, shoot, stage, turn, useCameraPosition]);
+
+  useEffect(() => {
+    if (!useCameraPosition || !cameraActive || !canInteract) return;
+    const boardX = (input.handPosition.x / 100 - 0.5) * carromBoard.half * 2;
+    const boardY = (input.handPosition.y / 100 - 0.5) * carromBoard.half * 2;
+    if (cameraPhase === "place") {
+      carromLockedAimRef.current = null;
+      carromPhaseReadyAtRef.current = 0;
+      flickArmReadyRef.current = false;
+      shotArmedAtRef.current = 0;
+      if (shotDirectionLocked) setShotDirectionLocked(false);
+      carromFingerFlickRef.current = {
+        index: { bent: false, startedAtMs: 0, peakBend: 0 },
+        middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+      };
+      if (flickPowerPreview !== 0) setFlickPowerPreview(0);
+      if (flickSpeedPreview !== 0) setFlickSpeedPreview(0);
+      placeStrikerFromCamera(boardX);
+    } else if (cameraPhase === "aim") {
+      const dx = boardX - striker.x;
+      const dy = boardY - striker.y;
+      const length = Math.hypot(dx, dy);
+      const minPower = accessibilityMode ? 0.35 : 0.24;
+      const liveAngle = length < 0.28 ? aim.angle : Math.atan2(dy, dx);
+      const nextAim = {
+        angle: liveAngle,
+        power: flickPowerPreview || minPower,
+      };
+      setAim(nextAim);
+      if (aimSamplingRef.current?.active) {
+        aimSamplingRef.current.angles.push(nextAim.angle);
+        aimSamplingRef.current.powers.push(nextAim.power);
+      }
+    } else {
+      const lockedAim = carromLockedAimRef.current;
+      if (lockedAim) {
+        setAim((currentAim) => ({ ...currentAim, angle: lockedAim.angle }));
+      }
+    }
+  }, [input.handPosition, cameraPhase, cameraActive, canInteract,
+      placeStrikerFromCamera, striker.x, striker.y, accessibilityMode, useCameraPosition,
+      aim.angle, flickPowerPreview, flickSpeedPreview, shotDirectionLocked]);
+
+  useEffect(() => {
+    if (
+      !useCameraPosition
+      || !cameraActive
+      || !canInteract
+      || !playerStrikerPlaced
+      || cameraPhase !== "armed"
+    ) {
+      if (shotDirectionLocked) setShotDirectionLocked(false);
+      carromFingerFlickRef.current = {
+        index: { bent: false, startedAtMs: 0, peakBend: 0 },
+        middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+      };
+      return;
+    }
+
+    const now = performance.now();
+    const bentThreshold = accessibilityMode ? 48 : 55;
+    const straightThreshold = accessibilityMode ? 38 : 32;
+    const minPower = accessibilityMode ? 0.35 : 0.24;
+    const minFlickSpeed = carromFlickProfile?.minFlickSpeed ?? (accessibilityMode ? 70 : 95);
+    const maxFlickSpeed = carromFlickProfile?.maxFlickSpeed ?? (accessibilityMode ? 260 : 340);
+    const aimStartedAtMs = aimSamplingRef.current?.startedAtMs ?? now;
+    const fingers: CarromFlickFinger[] = carromFlickProfile?.finger
+      ? [carromFlickProfile.finger]
+      : ["index", "middle"];
+    const flickFingerReady = fingers.every((finger) => input.fingerBends[finger] <= straightThreshold);
+
+    if (!flickArmReadyRef.current) {
+      if (flickFingerReady) {
+        flickArmReadyRef.current = true;
+        setMessage(`Ready. Bend and snap your ${carromFlickProfile?.finger ?? "index or middle"} finger to shoot.`);
+      } else {
+        return;
+      }
+    }
+
+    for (const finger of fingers) {
+      const bend = input.fingerBends[finger];
+      const state = carromFingerFlickRef.current[finger];
+
+      if (!state.bent) {
+        if (flickArmReadyRef.current && bend >= bentThreshold) {
+          carromFingerFlickRef.current[finger] = { bent: true, startedAtMs: now, peakBend: bend };
+          setCameraPhase("armed");
+          shotArmedAtRef.current = now;
+          setFlickPowerPreview(minPower);
+          setMessage(`Flick detected. Snap your ${finger} finger straight to shoot.`);
+        }
+        continue;
+      }
+
+      state.peakBend = Math.max(state.peakBend, bend);
+      const elapsedMs = Math.max(now - state.startedAtMs, 1);
+
+      if (cameraPhase === "armed" && now - shotArmedAtRef.current > 2500) {
+        carromFingerFlickRef.current[finger] = { bent: false, startedAtMs: 0, peakBend: 0 };
+        shotArmedAtRef.current = 0;
+        flickArmReadyRef.current = false;
+        setFlickPowerPreview(minPower);
+        setFlickSpeedPreview(0);
+        setMessage("Flick timed out. Relax your finger, then bend and snap again.");
+        continue;
+      }
+
+      if (bend > straightThreshold) {
+        const previewSpeed = Math.max(0, (state.peakBend - bend) / (elapsedMs / 1000));
+        if (previewSpeed > 0) {
+          const normalizedPreview = clamp((previewSpeed - minFlickSpeed) / (maxFlickSpeed - minFlickSpeed), 0, 1);
+          const previewPower = minPower + Math.sqrt(normalizedPreview) * (1 - minPower);
+          setFlickSpeedPreview(previewSpeed);
+          setFlickPowerPreview(previewPower);
+          setAim((currentAim) => ({ ...currentAim, power: previewPower }));
+        }
+        continue;
+      }
+
+      const extensionSpeed = (state.peakBend - bend) / (elapsedMs / 1000);
+      carromFingerFlickRef.current[finger] = { bent: false, startedAtMs: 0, peakBend: 0 };
+      setFlickSpeedPreview(Math.max(0, extensionSpeed));
+      const lockedAim = carromLockedAimRef.current ?? aim;
+
+      if (
+        cameraPhase !== "armed"
+        || extensionSpeed < minFlickSpeed
+        || now - shotArmedAtRef.current < 120
+        || now - lastCameraShotAtRef.current < 450
+        || now - aimStartedAtMs < 250
+      ) {
+        shotArmedAtRef.current = 0;
+        flickArmReadyRef.current = false;
+        setFlickPowerPreview(minPower);
+        setMessage(`${finger === "index" ? "Index" : "Middle"} flick was too slow. Relax, bend again, then snap straight faster.`);
+        continue;
+      }
+
+      const normalized = clamp((extensionSpeed - minFlickSpeed) / (maxFlickSpeed - minFlickSpeed), 0, 1);
+      const power = minPower + Math.sqrt(normalized) * (1 - minPower);
+      const otherFinger = finger === "index" ? "middle" : "index";
+      const otherBend = input.fingerBends[otherFinger];
+      const controlled = otherBend >= straightThreshold - 4;
+      const flickMetrics = carromFlickMetricAggRef.current;
+      flickMetrics.shots += 1;
+      flickMetrics.flickSpeedSum += extensionSpeed;
+      flickMetrics.bestFlickSpeed = Math.max(flickMetrics.bestFlickSpeed, extensionSpeed);
+      if (controlled) flickMetrics.controlledFlicks += 1;
+      recordAimMetrics();
+      lastCameraShotAtRef.current = now;
+      carromLockedAimRef.current = null;
+      carromPhaseReadyAtRef.current = 0;
+      flickArmReadyRef.current = false;
+      shotArmedAtRef.current = 0;
+      setShotDirectionLocked(false);
+      carromFingerFlickRef.current = {
+        index: { bent: false, startedAtMs: 0, peakBend: 0 },
+        middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+      };
+      setFlickPowerPreview(power);
+      setFlickSpeedPreview(extensionSpeed);
+      setCameraPhase("place");
+      shoot("player", { angle: lockedAim.angle, power });
+      setMessage(`${finger === "index" ? "Index" : "Middle"} flick shot fired`);
+      break;
+    }
+  }, [
+    accessibilityMode,
+    aim.angle,
+    cameraActive,
+    cameraPhase,
+    canInteract,
+    carromFlickProfile?.finger,
+    carromFlickProfile?.maxFlickSpeed,
+    carromFlickProfile?.minFlickSpeed,
+    input.fingerBends,
+    playerStrikerPlaced,
+    recordAimMetrics,
+    shoot,
+    shotDirectionLocked,
+    useCameraPosition
+  ]);
+
+  useEffect(() => {
+    if (!useCameraPosition || !cameraActive || !canInteract) return undefined;
+    if (cameraPhase !== "placement-locked" && cameraPhase !== "direction-locked") return undefined;
+
+    const delayMs = Math.max(carromPhaseReadyAtRef.current - performance.now(), 0);
+    const timer = window.setTimeout(() => {
+      if (cameraPhase === "placement-locked") {
+        setCameraPhase("aim");
+        setMessage("Now aim. Move your palm around the striker, then make a fist to lock direction.");
+        aimSamplingRef.current = { active: true, startedAtMs: performance.now(), angles: [], powers: [] };
+        return;
+      }
+
+      flickArmReadyRef.current = false;
+      carromFingerFlickRef.current = {
+        index: { bent: false, startedAtMs: 0, peakBend: 0 },
+        middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+      };
+      setFlickPowerPreview(accessibilityMode ? 0.35 : 0.24);
+      setFlickSpeedPreview(0);
+      setCameraPhase("armed");
+      setMessage(`Ready to shoot. Bend and snap your ${carromFlickProfile?.finger ?? "index or middle"} finger.`);
+    }, delayMs);
+
+    return () => window.clearTimeout(timer);
+  }, [accessibilityMode, cameraActive, cameraPhase, canInteract, carromFlickProfile?.finger, useCameraPosition]);
+
+  useEffect(() => {
+    if (!useCameraPosition || !cameraActive || !canInteract) return;
+    const prev = prevCamGestureRef.current;
+    const current = input.currentGesture;
+    prevCamGestureRef.current = current;
+
+    if (cameraPhase === "place" && prev !== "fist" && current === "fist") {
+      const now = performance.now();
+      setPlayerStrikerPlaced(true);
+      setPlayerStrikerLocked(true);
+      setCameraPhase("placement-locked");
+      carromLockedAimRef.current = null;
+      carromPhaseReadyAtRef.current = now + 2000;
+      flickArmReadyRef.current = false;
+      shotArmedAtRef.current = 0;
+      setShotDirectionLocked(false);
+      carromFingerFlickRef.current = {
+        index: { bent: false, startedAtMs: 0, peakBend: 0 },
+        middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+      };
+      setFlickPowerPreview(accessibilityMode ? 0.35 : 0.24);
+      setFlickSpeedPreview(0);
+      setMessage("Placement locked. Hold still for 2 seconds.");
+      aimSamplingRef.current = null;
+      return;
+    }
+
+    if (cameraPhase === "aim" && prev !== "fist" && current === "fist") {
+      const now = performance.now();
+      const lockedAim = { ...aim, power: flickPowerPreview || aim.power };
+      carromLockedAimRef.current = lockedAim;
+      carromPhaseReadyAtRef.current = now + 2000;
+      flickArmReadyRef.current = false;
+      shotArmedAtRef.current = 0;
+      setShotDirectionLocked(true);
+      setCameraPhase("direction-locked");
+      setAim(lockedAim);
+      setMessage("Direction locked. Hold still for 2 seconds, then flick.");
+      return;
+    }
+  }, [aim, input.currentGesture, cameraActive, cameraPhase, canInteract, accessibilityMode, flickPowerPreview, useCameraPosition]);
+
+  useEffect(() => {
+    if (!playerStrikerPlaced) setCameraPhase("place");
+  }, [playerStrikerPlaced]);
+
+  useEffect(() => {
+    if (stage === "playing" && turn === "player" && !isMoving) return;
+    carromLockedAimRef.current = null;
+    carromPhaseReadyAtRef.current = 0;
+    flickArmReadyRef.current = false;
+    shotArmedAtRef.current = 0;
+    setShotDirectionLocked(false);
+    carromFingerFlickRef.current = {
+      index: { bent: false, startedAtMs: 0, peakBend: 0 },
+      middle: { bent: false, startedAtMs: 0, peakBend: 0 }
+    };
+    if (useCameraPosition) setCameraPhase("place");
+  }, [isMoving, stage, turn, useCameraPosition]);
 
   useEffect(() => {
     if (stage !== "playing" || turn !== "ai") return;
@@ -3400,9 +4399,11 @@ function CarromGame({ assignment, onComplete }: GameProps) {
   }, [assignment.config.difficulty, pieces, queen, stage, startCarromPhysicsShot, striker, turn]);
 
   const carromMetrics = carromMetricAggRef.current;
+  const carromFlickMetrics = carromFlickMetricAggRef.current;
 
   const saveResult = () => {
     const metricShots = Math.max(carromMetrics.shots, 1);
+    const flickMetricShots = Math.max(carromFlickMetrics.shots, 1);
     finish({
       repsCompleted: shots,
       successfulReps: playerPocketed,
@@ -3421,21 +4422,63 @@ function CarromGame({ assignment, onComplete }: GameProps) {
         averageAimJitterDeg: Number(((carromMetrics.aimJitterSum / metricShots) * 180 / Math.PI).toFixed(2)),
         averagePullConsistency: Math.round((carromMetrics.forceControlSum / metricShots) * 100),
         averageTimeToAimSec: Number((carromMetrics.timeToAimSumSec / metricShots).toFixed(2)),
-        averageRestPauseSec: Number((carromMetrics.restPauseSumSec / metricShots).toFixed(2))
+        averageRestPauseSec: Number((carromMetrics.restPauseSumSec / metricShots).toFixed(2)),
+        averageFlickSpeed: Number((carromFlickMetrics.flickSpeedSum / flickMetricShots).toFixed(2)),
+        bestFlickSpeed: Number(carromFlickMetrics.bestFlickSpeed.toFixed(2)),
+        controlledFlickPercent: Math.round((carromFlickMetrics.controlledFlicks / flickMetricShots) * 100)
       }
     });
   };
 
-  const canInteract = stage === "playing" && turn === "player" && !isMoving && !pausedForFullscreen;
   const canAim = canInteract && playerStrikerPlaced;
   const queenLabel = queen.status === "available" ? "On board" : queen.status === "pending" ? `${queen.holder === "player" ? "You" : "AI"} cover` : `${queen.holder === "player" ? "You" : "AI"} covered`;
+  const fingerMinFlickSpeed = carromFlickProfile?.minFlickSpeed ?? (accessibilityMode ? 70 : 95);
+  const fingerMaxFlickSpeed = carromFlickProfile?.maxFlickSpeed ?? (accessibilityMode ? 260 : 340);
+  const calibratedFlickFingerLabel = carromFlickProfile?.finger === "middle" ? "middle" : carromFlickProfile?.finger === "index" ? "index" : "index or middle";
+  const flickMeterPct = clamp((flickSpeedPreview / Math.max(fingerMaxFlickSpeed, 1)) * 100, 0, 100);
+  const carromCoachTitle = !useCameraPosition
+    ? "Mouse controls"
+    : cameraPhase === "place"
+      ? "Step 1: Place the striker"
+      : cameraPhase === "placement-locked"
+        ? "Step 2: Placement locked"
+      : cameraPhase === "aim"
+        ? "Step 3: Aim 360 degrees"
+        : cameraPhase === "direction-locked"
+          ? "Step 4: Direction locked"
+          : "Step 5: Flick to shoot";
+  const carromCoachCopy = !useCameraPosition
+    ? "Drag the striker on the baseline, pull back, then release."
+    : cameraPhase === "place"
+      ? "Move your hand to slide the striker on the baseline. Make a fist to lock placement."
+      : cameraPhase === "placement-locked"
+        ? "Placement is frozen. Hold still for 2 seconds before aiming."
+      : cameraPhase === "aim"
+        ? "Move your palm around the striker to aim. Make a fist when the arrow points where you want."
+        : cameraPhase === "direction-locked"
+          ? "Direction is frozen. Hold still for 2 seconds before flicking."
+          : `Bend and snap your ${calibratedFlickFingerLabel} finger straight. Flick speed controls power.`;
+  const carromCoachHint = !useCameraPosition
+    ? "Use Camera restores glove aiming."
+    : cameraPhase === "armed"
+      ? flickSpeedPreview >= fingerMinFlickSpeed
+        ? "Good finger snap speed. Shot should fire."
+        : `Snap speed ${flickSpeedPreview.toFixed(0)} / ${fingerMinFlickSpeed.toFixed(0)} needed.`
+      : cameraPhase === "direction-locked"
+        ? "Do nothing during this pause. The next step will be flick."
+        : cameraPhase === "placement-locked"
+          ? "Do nothing during this pause. The next step will be aim."
+        : cameraPhase === "aim"
+          ? "You can aim all around the striker. Fist locks direction."
+          : "Tip: make a fist only when the striker is where you want it.";
+  const carromCoachPhaseIndex = cameraPhase === "place" ? 1 : cameraPhase === "placement-locked" ? 2 : cameraPhase === "aim" ? 3 : cameraPhase === "direction-locked" ? 4 : 5;
 
   return (
     <div
       ref={boardRef}
       className="carrom-3d-board"
       onPointerDown={(event) => {
-        if (!canInteract) return;
+        if (!canInteract || useCameraPosition) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         const bounds = event.currentTarget.getBoundingClientRect();
         if (!playerStrikerPlaced) {
@@ -3453,7 +4496,7 @@ function CarromGame({ assignment, onComplete }: GameProps) {
         }
       }}
       onPointerMove={(event) => {
-        if (!canInteract || !dragMode) return;
+        if (!canInteract || !dragMode || useCameraPosition) return;
         const bounds = event.currentTarget.getBoundingClientRect();
         if (dragMode === "place") {
           placePlayerStriker(event.clientX, event.clientY, bounds);
@@ -3462,49 +4505,14 @@ function CarromGame({ assignment, onComplete }: GameProps) {
         }
       }}
       onPointerUp={(event) => {
-        if (!canInteract || !dragMode) return;
+        if (!canInteract || !dragMode || useCameraPosition) return;
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId);
         }
         const bounds = event.currentTarget.getBoundingClientRect();
         if (dragMode === "aim") {
-          const nextAim = updateAimFromPoint(event.clientX, event.clientY, bounds);
-
-          // Aggregate rehab metrics for this aim/release cycle (approximate).
-          const sampling = aimSamplingRef.current;
-          if (sampling?.active) {
-            const nowMs = performance.now();
-            const timeToAimSec = (nowMs - sampling.startedAtMs) / 1000;
-            const angleArr = sampling.angles;
-            const powerArr = sampling.powers;
-
-            const mean = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / Math.max(arr.length, 1);
-            const stdDev = (arr: number[]) => {
-              if (arr.length < 2) return 0;
-              const m = mean(arr);
-              const variance = arr.reduce((s, v) => s + (v - m) * (v - m), 0) / arr.length;
-              return Math.sqrt(variance);
-            };
-
-            const angleStd = stdDev(angleArr);
-            const powerMean = mean(powerArr);
-            const powerStd = stdDev(powerArr);
-            // Higher is better: stable pull distance / force control.
-            const pullConsistency = clamp(1 - powerStd / Math.max(powerMean, 1e-6), 0, 1);
-
-            const restPauseSec = lastPlayerShotAtRef.current === null
-              ? 0
-              : (nowMs - lastPlayerShotAtRef.current) / 1000;
-
-            carromMetricAggRef.current.shots += 1;
-            carromMetricAggRef.current.aimJitterSum += angleStd;
-            carromMetricAggRef.current.forceControlSum += pullConsistency;
-            carromMetricAggRef.current.timeToAimSumSec += timeToAimSec;
-            carromMetricAggRef.current.restPauseSumSec += restPauseSec;
-
-            aimSamplingRef.current = null;
-          }
-
+          updateAimFromPoint(event.clientX, event.clientY, bounds);
+          recordAimMetrics();
           input.emitGesture("flick", gestureTargets.flick, input.handPosition);
         } else {
           const locked = placePlayerStriker(event.clientX, event.clientY, bounds);
@@ -3539,7 +4547,10 @@ function CarromGame({ assignment, onComplete }: GameProps) {
         <CarromScene
           pieces={pieces}
           aim={aim}
-          showAim={canAim && dragMode === "aim"}
+          showAim={canAim && (dragMode === "aim" || (useCameraPosition && cameraActive && (cameraPhase === "aim" || cameraPhase === "direction-locked" || cameraPhase === "armed")))}
+          powerPreview={useCameraPosition && (cameraPhase === "aim" || cameraPhase === "direction-locked" || cameraPhase === "armed") ? flickPowerPreview || aim.power : aim.power}
+          armed={useCameraPosition && cameraActive && cameraPhase === "armed"}
+          locked={useCameraPosition && cameraActive && (cameraPhase === "direction-locked" || cameraPhase === "armed")}
           placementGuideMode={canInteract && !playerStrikerPlaced ? (playerStrikerLocked ? "locked" : "recover") : null}
         />
       </Canvas>
@@ -3553,14 +4564,87 @@ function CarromGame({ assignment, onComplete }: GameProps) {
           <span>You {playerPocketed}/9 White</span>
           <span>AI {aiPocketed}/9 Black</span>
           <span>Queen {queenLabel}</span>
-          <span>Power {Math.round(aim.power * 100)}%</span>
+          <span>Power {Math.round((useCameraPosition && (cameraPhase === "aim" || cameraPhase === "direction-locked" || cameraPhase === "armed") ? flickPowerPreview || aim.power : aim.power) * 100)}%</span>
+          {useCameraPosition && <span>Flick {flickSpeedPreview.toFixed(1)}</span>}
           <span>Fouls {playerFouls}-{aiFouls}</span>
+        </div>
+        <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.25rem" }}>
+          <button
+            type="button"
+            className={useCameraPosition ? "primary-button compact-game-button" : "secondary-button compact-game-button"}
+            onClick={toggleCarromCameraPosition}
+            disabled={cameraLoading}
+            title={useCameraPosition ? "Switch to mouse movement" : "Use webcam hand tracking for movement"}
+          >
+            {useCameraPosition ? <VideoOff size={15} /> : <Video size={15} />}
+            {cameraLoading ? "Starting…" : useCameraPosition ? "Use Mouse" : "Use Camera"}
+          </button>
+          {useCameraPosition && cameraActive && (
+            <button
+              type="button"
+              className={showCarromPreview ? "primary-button compact-game-button" : "secondary-button compact-game-button"}
+              onClick={() => setShowCarromPreview((v) => !v)}
+            >
+              {showCarromPreview ? "Hide View" : "Show View"}
+            </button>
+          )}
         </div>
       </div>
 
+      {turn === "player" && stage === "playing" && (
+        <div
+          className={`carrom-coach-card carrom-coach-card--${cameraPhase}`}
+        >
+          <div className="carrom-coach-card__steps" aria-hidden="true">
+            {["Place", "Wait", "Aim", "Wait", "Flick"].map((label, index) => (
+              <span key={`${label}-${index}`} className={carromCoachPhaseIndex >= index + 1 ? "active" : ""}>{index + 1} {label}</span>
+            ))}
+          </div>
+          <strong className="carrom-coach-card__title">{carromCoachTitle}</strong>
+          <span className="carrom-coach-card__copy">{carromCoachCopy}</span>
+          {useCameraPosition && cameraPhase === "armed" && (
+            <div className="carrom-coach-card__meter">
+              <div>
+                <div
+                  style={{
+                    width: `${flickMeterPct}%`,
+                    height: "100%",
+                    borderRadius: 999,
+                    background: flickSpeedPreview >= fingerMinFlickSpeed ? "#22c55e" : "#f97316"
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          <span className="carrom-coach-card__hint">{carromCoachHint}</span>
+        </div>
+      )}
+
       <div className="carrom-status-bar">
         <span>{message}</span>
-        <span>{canInteract ? (playerStrikerPlaced ? "Aim: pull back and release." : "Place striker on your baseline first.") : pausedForFullscreen ? "Fullscreen required." : isMoving ? "Pieces moving." : "Waiting."}</span>
+        <span>
+          {useCameraPosition
+            ? pausedForTracking
+              ? "Camera: hand not visible"
+              : cameraLoading
+                ? "Camera: starting"
+                : cameraError
+                  ? "Camera blocked · use mouse mode if needed"
+                  : camera.landmark
+                    ? cameraPhase === "place"
+                      ? "Camera: open hand slides striker · make fist to aim"
+                      : cameraPhase === "placement-locked"
+                        ? "Placement locked · wait 2s"
+                      : cameraPhase === "aim"
+                        ? "Aim 360° with palm · make fist to lock"
+                        : cameraPhase === "direction-locked"
+                          ? "Direction locked · wait 2s"
+                          : "Ready · flick finger to shoot"
+                    : "Camera: show hand to start movement"
+            : canInteract
+              ? playerStrikerPlaced ? "Aim: pull back and release." : "Place striker on your baseline first."
+              : pausedForFullscreen ? "Fullscreen required." : isMoving ? "Pieces moving." : "Waiting."}
+        </span>
       </div>
 
       {stage === "start" && (
@@ -3590,6 +4674,20 @@ function CarromGame({ assignment, onComplete }: GameProps) {
         </div>
       )}
 
+      {pausedForTracking && (
+        <div className="carrom-overlay">
+          <div className="carrom-menu">
+            <span className="eyebrow">Paused</span>
+            <h3>Hand Not Visible</h3>
+            <p>Move your hand back into the camera view, or switch to mouse movement.</p>
+            <div className="carrom-menu-actions">
+              <button type="button" className="primary-button" onClick={() => setPausedForTracking(false)}>Resume Camera</button>
+              <button type="button" className="secondary-button" onClick={toggleCarromCameraPosition}>Play with Mouse</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {stage === "ended" && (
         <div className="carrom-overlay">
           <div className="carrom-menu">
@@ -3601,12 +4699,20 @@ function CarromGame({ assignment, onComplete }: GameProps) {
                 Avg Aim Jitter: {((carromMetrics.aimJitterSum / carromMetrics.shots) * 180 / Math.PI).toFixed(1)}° · Avg Pull Consistency: {(carromMetrics.forceControlSum / carromMetrics.shots * 100).toFixed(0)}% · Avg Time to Aim: {(carromMetrics.timeToAimSumSec / carromMetrics.shots).toFixed(1)}s · Avg Rest Pause: {(carromMetrics.restPauseSumSec / carromMetrics.shots).toFixed(1)}s
               </p>
             )}
+            {carromFlickMetrics.shots > 0 && (
+              <p>
+                Avg Flick Speed: {(carromFlickMetrics.flickSpeedSum / carromFlickMetrics.shots).toFixed(1)} · Best Flick: {carromFlickMetrics.bestFlickSpeed.toFixed(1)} · Controlled Flicks: {(carromFlickMetrics.controlledFlicks / carromFlickMetrics.shots * 100).toFixed(0)}%
+              </p>
+            )}
             <div className="carrom-menu-actions">
               <button type="button" className="primary-button" onClick={saveResult}>Save Results</button>
               <button type="button" className="secondary-button" onClick={startGame}>Play Again</button>
             </div>
           </div>
         </div>
+      )}
+      {useCameraPosition && cameraActive && showCarromPreview && (
+        <CameraPreview stream={camera.stream} landmark={camera.landmark} />
       )}
     </div>
   );
@@ -3626,11 +4732,17 @@ function CarromScene({
   pieces,
   aim,
   showAim,
+  powerPreview,
+  armed,
+  locked,
   placementGuideMode
 }: {
   pieces: CarromPiece[];
   aim: CarromAim;
   showAim: boolean;
+  powerPreview?: number;
+  armed?: boolean;
+  locked?: boolean;
   placementGuideMode: "recover" | "locked" | null;
 }) {
   const striker = pieces.find((piece) => piece.coin === "striker") ?? pieces[0];
@@ -3643,7 +4755,7 @@ function CarromScene({
         <CarromPieceMesh key={piece.id} piece={piece} />
       ))}
       {showAim && (
-        <CarromAimGuide striker={striker} aim={aim} />
+        <CarromAimGuide striker={striker} aim={aim} powerPreview={powerPreview} armed={armed} locked={locked} />
       )}
     </group>
   );
@@ -3839,17 +4951,47 @@ function CarromBoardModel() {
 
 useGLTF.preload(carromBoardModelUrl);
 
-function CarromAimGuide({ striker, aim }: { striker: CarromPiece; aim: CarromAim }) {
+function CarromAimGuide({
+  striker,
+  aim,
+  powerPreview = aim.power,
+  armed = false,
+  locked = false
+}: {
+  striker: CarromPiece;
+  aim: CarromAim;
+  powerPreview?: number;
+  armed?: boolean;
+  locked?: boolean;
+}) {
   const dx = Math.cos(aim.angle);
   const dz = Math.sin(aim.angle);
   const rotationY = Math.PI / 2 - aim.angle;
   const greenLength = 0.9;
-  const redLength = 0.35 + aim.power * 1.75;
+  const redLength = 0.35 + powerPreview * 1.75;
   const greenStart = striker.radius + 0.08;
   const redStart = striker.radius + 0.05;
 
   return (
     <group>
+      {locked && (
+        <mesh position={[striker.x, 0.505, striker.y]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[striker.radius * (armed ? 1.42 : 1.28), armed ? 0.022 : 0.018, 10, 64]} />
+          <meshStandardMaterial
+            color={armed ? "#f97316" : "#22c55e"}
+            emissive={armed ? "#f97316" : "#16a34a"}
+            emissiveIntensity={armed ? 0.45 : 0.28}
+            transparent
+            opacity={armed ? 0.82 : 0.72}
+          />
+        </mesh>
+      )}
+      {armed && (
+        <mesh position={[striker.x, 0.51, striker.y]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[striker.radius * 1.72, 0.012, 10, 64]} />
+          <meshStandardMaterial color="#fdba74" emissive="#fb923c" emissiveIntensity={0.25} transparent opacity={0.42} />
+        </mesh>
+      )}
       <mesh
         position={[
           striker.x + dx * (greenStart + greenLength / 2),

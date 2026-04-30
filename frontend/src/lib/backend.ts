@@ -159,7 +159,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 
     });
 
     if (!response.ok) {
-      throw new Error(`Backend request failed: ${response.status} ${response.statusText}`);
+      let detail = "";
+      try {
+        const body = await response.json();
+        detail = body?.error ? `: ${body.error}` : "";
+      } catch {
+        // Ignore non-JSON error bodies.
+      }
+      throw new Error(`Backend request failed: ${response.status} ${response.statusText}${detail}`);
     }
 
     return (await response.json()) as T;
@@ -321,6 +328,11 @@ function mapBackendPatient(patient: BackendPatient, sessions: RehabSession[]): P
 
 export async function checkBackendHealth(): Promise<BackendHealth> {
   return apiFetch<BackendHealth>("/health", undefined, 1000);
+}
+
+export async function fetchBackendPatientSummaries(): Promise<Patient[]> {
+  const backendPatients = await apiFetch<BackendPatient[]>("/api/patients");
+  return backendPatients.map((patient) => mapBackendPatient(patient, []));
 }
 
 export async function fetchBackendPatients(): Promise<Patient[]> {

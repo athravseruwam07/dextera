@@ -1,7 +1,7 @@
 import type { GameId } from "../types";
 import type { PatientGloveMode } from "./input";
 
-export type CalibrationRequirement = "open-fist" | "finger-taps" | "point-pinch";
+export type CalibrationRequirement = "open-fist" | "finger-taps" | "point-pinch" | "finger-flick";
 
 export type PatientGameManifest = {
   id: GameId;
@@ -49,11 +49,11 @@ export const patientGameManifests: Record<GameId, PatientGameManifest> = {
     id: "carrom-flick",
     name: "Carrom",
     gloveMode: "raw",
-    calibration: ["open-fist"],
-    inputSummary: "Pointer or trackpad places and aims; bridge flick, fist release, or pointer release shoots.",
+    calibration: ["open-fist", "finger-flick"],
+    inputSummary: "Camera mode places and aims; calibrated index or middle finger extension speed shoots.",
     fullscreen: "required",
     audio: false,
-    resultMetrics: ["shots", "pockets", "fouls", "aimJitter", "pullConsistency", "timeToAim"]
+    resultMetrics: ["shots", "pockets", "fouls", "aimJitter", "pullConsistency", "timeToAim", "flickSpeed", "controlledFlicks"]
   }
 };
 

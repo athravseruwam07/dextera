@@ -13,6 +13,6 @@ describe("patient game registry", () => {
     expect(patientGameManifests["ball-pickup"].calibration).toEqual(["open-fist"]);
     expect(patientGameManifests["finger-tap-piano"].calibration).toEqual(["open-fist", "finger-taps"]);
     expect(patientGameManifests["bubble-pop"].calibration).toEqual(["open-fist", "point-pinch"]);
-    expect(patientGameManifests["carrom-flick"].calibration).toEqual(["open-fist"]);
+    expect(patientGameManifests["carrom-flick"].calibration).toEqual(["open-fist", "finger-flick"]);
   });
 });

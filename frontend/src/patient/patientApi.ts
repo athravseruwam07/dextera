@@ -52,10 +52,13 @@ export async function savePatientSessionResult(
   result: SessionResult,
   assignment: PatientCareAssignment,
   backendConnected: boolean
-): Promise<{ result: SessionResult; backendSaved: boolean }> {
+): Promise<{ result: SessionResult; backendSaved: boolean; errorMessage?: string }> {
   let backendSaved = false;
+  let errorMessage: string | undefined;
 
-  if (backendConnected) {
+  const shouldTryBackend = backendConnected || result.syncStatus === "pending";
+
+  if (shouldTryBackend) {
     try {
       const exerciseBase = assignmentToExerciseTemplate(assignment);
       const exercise = { ...exerciseBase, id: assignment.gameId };
@@ -99,18 +102,36 @@ export async function savePatientSessionResult(
       });
 
       backendSaved = true;
-      const aligned: SessionResult = { ...result, id: backendSession.id };
+      const syncedAt = new Date().toISOString();
+      const aligned: SessionResult = {
+        ...result,
+        id: backendSession.id,
+        backendSessionId: backendSession.id,
+        syncStatus: "synced",
+        syncedAt,
+        syncMessage: "Synced to the clinician dashboard."
+      };
       return {
-        result: saveSessionResultLocal(aligned),
+        result: saveSessionResultLocal(aligned, result.id),
         backendSaved
       };
-    } catch {
+    } catch (error) {
       backendSaved = false;
+      errorMessage = error instanceof Error ? error.message : "Backend sync failed.";
     }
   }
 
+  const pending: SessionResult = {
+    ...result,
+    syncStatus: "pending",
+      syncMessage: shouldTryBackend
+      ? "Saved on this device, but backend sync failed. Retry before the clinician reviews the chart."
+      : "Saved on this device. It will not appear in the clinician chart until backend sync succeeds."
+  };
+
   return {
-    result: saveSessionResultLocal(result),
-    backendSaved
+    result: saveSessionResultLocal(pending),
+    backendSaved,
+    errorMessage
   };
 }

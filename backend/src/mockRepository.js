@@ -192,7 +192,13 @@ const assignments = [
 
 const sessions = [];
 const gestureEvents = [];
-const exerciseAssignments = [];
+const exerciseAssignments = [
+  { id: "demo-ea-p1-1", patientId: "demo-patient-1", exerciseId: "ex-thumb",        assignedAt: "2025-01-01T00:00:00.000Z", status: "assigned", completedAt: null, result: null },
+  { id: "demo-ea-p1-2", patientId: "demo-patient-1", exerciseId: "ex-pinch",        assignedAt: "2025-01-01T00:00:00.000Z", status: "assigned", completedAt: null, result: null },
+  { id: "demo-ea-p1-3", patientId: "demo-patient-1", exerciseId: "ex-index-middle", assignedAt: "2025-01-01T00:00:00.000Z", status: "assigned", completedAt: null, result: null },
+  { id: "demo-ea-p2-1", patientId: "demo-patient-2", exerciseId: "ex-index",        assignedAt: "2025-01-01T00:00:00.000Z", status: "assigned", completedAt: null, result: null },
+  { id: "demo-ea-p2-2", patientId: "demo-patient-2", exerciseId: "ex-ring",         assignedAt: "2025-01-01T00:00:00.000Z", status: "assigned", completedAt: null, result: null },
+];
 let latestGloveEvent = null;
 const calibrations = new Map();
 

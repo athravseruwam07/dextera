@@ -315,9 +315,9 @@ export function loadSessionResults(patientId: string): SessionResult[] {
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-export function saveSessionResultLocal(result: SessionResult): SessionResult {
+export function saveSessionResultLocal(result: SessionResult, replaceId?: string): SessionResult {
   const saved = { ...result, savedAt: new Date().toISOString() };
-  const next = [saved, ...readAllResults().filter((item) => item.id !== saved.id)];
+  const next = [saved, ...readAllResults().filter((item) => item.id !== saved.id && item.id !== replaceId)];
   writeAllResults(next);
   return saved;
 }
@@ -347,7 +347,9 @@ export function sessionResultToRehabSession(result: SessionResult): RehabSession
         ? 1
         : 0,
     notes: `${result.gameName}: ${result.encouragement} Pain ${result.painBefore.pain}->${result.painAfter.pain}, fatigue ${result.painBefore.fatigue}->${result.painAfter.fatigue}.`,
-    events: result.events
+    events: result.events,
+    syncStatus: result.syncStatus,
+    syncMessage: result.syncMessage
   };
 }
 

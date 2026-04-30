@@ -1,6 +1,7 @@
 const { query, withTransaction } = require("./db/pool");
 
 let exerciseAssignmentsReady = false;
+let assignmentsReady = false;
 
 async function ensureExerciseAssignmentsTable() {
   if (exerciseAssignmentsReady) return;
@@ -20,10 +21,59 @@ async function ensureExerciseAssignmentsTable() {
   await query("ALTER TABLE exercise_assignments ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ");
   await query("ALTER TABLE exercise_assignments ADD COLUMN IF NOT EXISTS result JSONB NOT NULL DEFAULT '{}'::jsonb");
   await query(`
+    DELETE FROM exercise_assignments older
+    USING exercise_assignments newer
+    WHERE older.patient_id = newer.patient_id
+      AND older.exercise_id = newer.exercise_id
+      AND (
+        older.assigned_at < newer.assigned_at
+        OR (older.assigned_at = newer.assigned_at AND older.id < newer.id)
+      )
+  `);
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS exercise_assignments_patient_exercise_uidx
+    ON exercise_assignments(patient_id, exercise_id)
+  `);
+  await query(`
     CREATE INDEX IF NOT EXISTS exercise_assignments_patient_idx
     ON exercise_assignments(patient_id, assigned_at DESC)
   `);
   exerciseAssignmentsReady = true;
+}
+
+async function ensureAssignmentsTable() {
+  if (assignmentsReady) return;
+  await query(`
+    CREATE TABLE IF NOT EXISTS assignments (
+      id TEXT PRIMARY KEY,
+      patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+      doctor_id TEXT NOT NULL DEFAULT 'doctor-1',
+      game_id TEXT NOT NULL,
+      game_name TEXT NOT NULL,
+      difficulty TEXT NOT NULL DEFAULT 'easy',
+      reps INTEGER,
+      rounds INTEGER,
+      frequency TEXT NOT NULL,
+      due_date TEXT NOT NULL,
+      target_skill TEXT NOT NULL,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'assigned',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS doctor_id TEXT NOT NULL DEFAULT 'doctor-1'");
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS reps INTEGER");
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS rounds INTEGER");
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS notes TEXT");
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'assigned'");
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()");
+  await query("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()");
+  await query(`
+    CREATE INDEX IF NOT EXISTS assignments_patient_idx
+    ON assignments(patient_id, due_date ASC)
+  `);
+  assignmentsReady = true;
 }
 
 function mapPatient(row) {
@@ -68,6 +118,26 @@ function mapExerciseAssignment(row) {
   };
 }
 
+function mapAssignment(row) {
+  return {
+    id: row.id,
+    patientId: row.patient_id,
+    doctorId: row.doctor_id || "doctor-1",
+    gameId: row.game_id,
+    gameName: row.game_name,
+    difficulty: row.difficulty || "easy",
+    reps: row.reps,
+    rounds: row.rounds,
+    frequency: row.frequency,
+    dueDate: row.due_date,
+    targetSkill: row.target_skill,
+    notes: row.notes || "",
+    status: row.status || "assigned",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 function mapGestureEvent(row) {
   const raw = row.raw || {};
   return {
@@ -105,14 +175,26 @@ async function listPatients() {
     `
       SELECT
         p.*,
-        COUNT(DISTINCT s.id) AS total_sessions,
-        COALESCE(SUM(er.reps_completed), 0) AS reps_completed,
-        MAX(CASE WHEN ge.gesture = 'fist' THEN ge.accuracy END) AS best_fist_score
+        COALESCE(session_stats.total_sessions, 0) AS total_sessions,
+        COALESCE(result_stats.reps_completed, 0) AS reps_completed,
+        fist_stats.best_fist_score
       FROM patients p
-      LEFT JOIN sessions s ON s.patient_id = p.id
-      LEFT JOIN exercise_results er ON er.patient_id = p.id
-      LEFT JOIN gesture_events ge ON ge.patient_id = p.id
-      GROUP BY p.id
+      LEFT JOIN (
+        SELECT patient_id, COUNT(*) AS total_sessions
+        FROM sessions
+        GROUP BY patient_id
+      ) session_stats ON session_stats.patient_id = p.id
+      LEFT JOIN (
+        SELECT patient_id, COALESCE(SUM(reps_completed), 0) AS reps_completed
+        FROM exercise_results
+        GROUP BY patient_id
+      ) result_stats ON result_stats.patient_id = p.id
+      LEFT JOIN (
+        SELECT patient_id, MAX(accuracy) AS best_fist_score
+        FROM gesture_events
+        WHERE gesture = 'fist'
+        GROUP BY patient_id
+      ) fist_stats ON fist_stats.patient_id = p.id
       ORDER BY p.created_at DESC
     `
   );
@@ -382,6 +464,97 @@ async function createExerciseResult(payload) {
   return result.rows[0];
 }
 
+async function listPatientAssignments(patientId) {
+  await ensureAssignmentsTable();
+  const result = await query(
+    `
+      SELECT *
+      FROM assignments
+      WHERE patient_id = $1
+      ORDER BY due_date ASC, created_at DESC
+    `,
+    [patientId]
+  );
+  return result.rows.map(mapAssignment);
+}
+
+async function createAssignment(payload) {
+  await ensureAssignmentsTable();
+  const now = new Date().toISOString();
+  const result = await query(
+    `
+      INSERT INTO assignments (
+        id, patient_id, doctor_id, game_id, game_name, difficulty, reps, rounds,
+        frequency, due_date, target_skill, notes, status, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+      RETURNING *
+    `,
+    [
+      payload.id || `assignment-${Date.now()}`,
+      payload.patientId,
+      payload.doctorId || "doctor-1",
+      payload.gameId,
+      payload.gameName,
+      payload.difficulty || "easy",
+      payload.reps ?? null,
+      payload.rounds ?? null,
+      payload.frequency,
+      payload.dueDate,
+      payload.targetSkill,
+      payload.notes || "",
+      payload.status || "assigned",
+      now
+    ]
+  );
+  return mapAssignment(result.rows[0]);
+}
+
+async function updateAssignment(id, patch) {
+  await ensureAssignmentsTable();
+  const result = await query(
+    `
+      UPDATE assignments
+      SET
+        doctor_id = COALESCE($2, doctor_id),
+        game_id = COALESCE($3, game_id),
+        game_name = COALESCE($4, game_name),
+        difficulty = COALESCE($5, difficulty),
+        reps = COALESCE($6, reps),
+        rounds = COALESCE($7, rounds),
+        frequency = COALESCE($8, frequency),
+        due_date = COALESCE($9, due_date),
+        target_skill = COALESCE($10, target_skill),
+        notes = COALESCE($11, notes),
+        status = COALESCE($12, status),
+        updated_at = now()
+      WHERE id = $1
+      RETURNING *
+    `,
+    [
+      id,
+      patch.doctorId || null,
+      patch.gameId || null,
+      patch.gameName || null,
+      patch.difficulty || null,
+      patch.reps ?? null,
+      patch.rounds ?? null,
+      patch.frequency || null,
+      patch.dueDate || null,
+      patch.targetSkill || null,
+      patch.notes ?? null,
+      patch.status || null
+    ]
+  );
+  return result.rows[0] ? mapAssignment(result.rows[0]) : null;
+}
+
+async function deleteAssignment(id) {
+  await ensureAssignmentsTable();
+  const result = await query("DELETE FROM assignments WHERE id = $1 RETURNING id", [id]);
+  return result.rowCount > 0;
+}
+
 async function listPatientExerciseAssignments(patientId) {
   await ensureExerciseAssignmentsTable();
   const result = await query(
@@ -534,6 +707,10 @@ module.exports = {
   listExercises,
   createExercise,
   createExerciseResult,
+  listPatientAssignments,
+  createAssignment,
+  updateAssignment,
+  deleteAssignment,
   listPatientExerciseAssignments,
   createExerciseAssignment,
   updateExerciseAssignment,

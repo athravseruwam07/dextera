@@ -19,14 +19,29 @@ const fingerLabel: Record<FingerName, string> = {
 
 interface Props {
   patients: Patient[];
+  selectedPatientId: string;
   assignments: ExerciseAssignment[];
-  onAssign: (patientId: string, exerciseId: string) => void;
-  onUnassign: (assignmentId: string) => void;
+  loading?: boolean;
+  busyExerciseIds?: string[];
+  error?: string;
+  onSelectPatient: (patientId: string) => void;
+  onAssign: (patientId: string, exerciseId: string) => void | Promise<void>;
+  onUnassign: (assignmentId: string) => void | Promise<void>;
 }
 
-export function ExercisesPage({ patients, assignments, onAssign, onUnassign }: Props) {
-  const [selectedPatientId, setSelectedPatientId] = useState(patients[0]?.id ?? "");
+export function ExercisesPage({
+  patients,
+  selectedPatientId,
+  assignments,
+  loading = false,
+  busyExerciseIds = [],
+  error,
+  onSelectPatient,
+  onAssign,
+  onUnassign
+}: Props) {
   const [categoryFilter, setCategoryFilter] = useState<ExerciseCategory | "all">("all");
+  const busyExerciseSet = useMemo(() => new Set(busyExerciseIds), [busyExerciseIds]);
 
   const filteredExercises = useMemo(
     () => (categoryFilter === "all" ? fingerExercises : fingerExercises.filter((exercise) => exercise.category === categoryFilter)),
@@ -57,7 +72,8 @@ export function ExercisesPage({ patients, assignments, onAssign, onUnassign }: P
         <div className="exercises-control-row">
           <label>
             <span className="eyebrow">Patient</span>
-            <select value={selectedPatientId} onChange={(event) => setSelectedPatientId(event.target.value)}>
+            <select value={selectedPatientId} onChange={(event) => onSelectPatient(event.target.value)} disabled={loading || patients.length === 0}>
+              {patients.length === 0 ? <option value="">{loading ? "Loading patients..." : "No patients available"}</option> : null}
               {patients.map((patient) => (
                 <option key={patient.id} value={patient.id}>
                   {patient.name}
@@ -80,11 +96,13 @@ export function ExercisesPage({ patients, assignments, onAssign, onUnassign }: P
             </select>
           </label>
         </div>
+        {error ? <p className="error-text">{error}</p> : null}
       </article>
 
       <div className="exercise-grid">
         {filteredExercises.map((exercise) => {
           const assigned = assignedExercise(exercise.id);
+          const busy = busyExerciseSet.has(exercise.id);
           return (
             <ExerciseCard
               key={exercise.id}
@@ -92,7 +110,8 @@ export function ExercisesPage({ patients, assignments, onAssign, onUnassign }: P
               assigned={Boolean(assigned)}
               onAssign={() => onAssign(selectedPatientId, exercise.id)}
               onUnassign={() => assigned && onUnassign(assigned.id)}
-              disabled={!selectedPatientId}
+              disabled={!selectedPatientId || loading || busy}
+              busy={busy}
             />
           );
         })}
@@ -134,12 +153,14 @@ function ExerciseCard({
   exercise,
   assigned,
   disabled,
+  busy,
   onAssign,
   onUnassign
 }: {
   exercise: FingerExercise;
   assigned: boolean;
   disabled: boolean;
+  busy: boolean;
   onAssign: () => void;
   onUnassign: () => void;
 }) {
@@ -155,14 +176,14 @@ function ExerciseCard({
         <span className="exercise-meta-item">{exercise.fingers.map((finger) => fingerLabel[finger]).join(" + ")}</span>
       </div>
       {assigned ? (
-        <button className="secondary-button" type="button" onClick={onUnassign}>
+        <button className="secondary-button" type="button" onClick={onUnassign} disabled={disabled}>
           <Trash2 size={14} />
-          Unassign
+          {busy ? "Updating..." : "Unassign"}
         </button>
       ) : (
         <button className="primary-button" type="button" onClick={onAssign} disabled={disabled}>
           <Plus size={14} />
-          Assign
+          {busy ? "Assigning..." : "Assign"}
         </button>
       )}
     </article>

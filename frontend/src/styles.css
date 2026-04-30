@@ -634,6 +634,199 @@ th {
   gap: 1rem;
 }
 
+.patient-roster-page {
+  align-content: start;
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.patient-roster-heading {
+  align-items: flex-end;
+}
+
+.patient-roster-search {
+  width: min(100%, 330px);
+  min-width: 260px;
+}
+
+.patient-roster-search input {
+  min-width: 0;
+}
+
+.patient-roster-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-top: -0.35rem;
+}
+
+.patient-roster-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.25rem 0.58rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.patient-roster-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 420px));
+  gap: 0.9rem;
+  align-items: stretch;
+  justify-content: start;
+}
+
+.patient-roster-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgba(21, 32, 51, 0.055);
+}
+
+.patient-roster-card-head,
+.patient-roster-identity,
+.patient-roster-footer,
+.patient-roster-footnotes {
+  display: flex;
+  align-items: center;
+}
+
+.patient-roster-card-head {
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.patient-roster-identity {
+  min-width: 0;
+  gap: 0.75rem;
+}
+
+.patient-roster-avatar {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  color: var(--primary);
+  background: #eef2ff;
+}
+
+.patient-roster-identity > div:last-child {
+  min-width: 0;
+}
+
+.patient-roster-identity span,
+.patient-roster-footnotes span {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-roster-identity h3 {
+  overflow: hidden;
+  margin: 0.1rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-roster-goal {
+  display: -webkit-box;
+  min-height: 2.65rem;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.patient-roster-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.patient-roster-metrics div {
+  display: flex;
+  min-height: 64px;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.62rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.patient-roster-metrics span,
+.patient-roster-metrics strong {
+  display: block;
+}
+
+.patient-roster-metrics span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patient-roster-metrics strong {
+  margin-top: 0.18rem;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.patient-roster-footer {
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.1rem;
+}
+
+.patient-roster-footnotes {
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.16rem;
+}
+
+.patient-roster-action {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding-inline: 0.9rem;
+}
+
+.patient-roster-card--loading {
+  pointer-events: none;
+}
+
+.patient-roster-card--loading :is(.patient-roster-avatar, .patient-roster-identity span, .patient-roster-identity h3, .patient-roster-goal, .patient-roster-metrics div) {
+  color: transparent;
+  background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);
+  background-size: 220% 100%;
+  animation: rosterSkeleton 1.1s ease-in-out infinite;
+}
+
 .patient-card,
 .surface,
 .metric-card,
@@ -1876,17 +2069,6 @@ th {
   background: #fff;
 }
 
-  .patient-grid,
-  .metric-grid,
-  .chart-grid,
-  .landing-band,
-  .patient-metric-grid,
-  .event-strip,
-  .detail-list,
-  .form-row,
-  .vr-hud-metrics {
-    grid-template-columns: 1fr;
-  }
 .input-mode-selector button {
   min-height: 34px;
   display: inline-flex;
@@ -2052,9 +2234,9 @@ th {
 }
 
 .pregame-detail {
-  width: min(100%, 980px);
-  gap: clamp(0.85rem, 2vw, 1.2rem);
-  padding-top: clamp(0.85rem, 2.2vw, 1.25rem);
+  width: min(100%, 1040px);
+  gap: clamp(0.7rem, 1.5vw, 1rem);
+  padding-top: clamp(0.55rem, 1.4vw, 0.9rem);
 }
 
 .pregame-detail h2,
@@ -2094,7 +2276,7 @@ th {
 .pregame-hero {
   overflow: hidden;
   border-radius: 8px;
-  padding: clamp(1rem, 2.4vw, 1.2rem);
+  padding: clamp(0.82rem, 1.8vw, 1rem);
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid rgba(198, 214, 234, 0.72);
   box-shadow: 0 18px 38px rgba(15, 46, 75, 0.08);
@@ -2102,20 +2284,20 @@ th {
 
 .pregame-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(250px, 0.92fr);
-  gap: clamp(1rem, 2.6vw, 1.4rem);
+  grid-template-columns: minmax(0, 1.15fr) minmax(220px, 0.75fr);
+  gap: clamp(0.82rem, 1.8vw, 1.15rem);
   align-items: center;
 }
 
 .pregame-hero-copy {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.55rem;
   min-width: 0;
 }
 
 .pregame-hero-title {
   margin: 0;
-  font-size: clamp(1.55rem, 3vw, 2rem);
+  font-size: clamp(1.42rem, 2.5vw, 1.82rem);
   font-weight: 900;
   line-height: 1.1;
 }
@@ -2124,7 +2306,7 @@ th {
   margin: 0;
   max-width: 36rem;
   color: #52667d;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
   font-weight: 600;
   line-height: 1.45;
 }
@@ -2152,12 +2334,12 @@ th {
 .pregame-hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
+  gap: 0.5rem;
   margin-top: 0.15rem;
 }
 
 .pregame-detail .pregame-hero-cta {
-  min-height: 44px;
+  min-height: 40px;
   border-radius: 8px;
 }
 
@@ -2178,7 +2360,7 @@ th {
 .pregame-hero-visual {
   overflow: hidden;
   min-width: 0;
-  padding: 0.42rem;
+  padding: 0.34rem;
   border-radius: 10px;
   border: 1px solid rgba(79, 108, 135, 0.26);
   background:
@@ -2200,7 +2382,7 @@ th {
   position: relative;
   display: block;
   width: 100%;
-  aspect-ratio: 280 / 132;
+  aspect-ratio: 300 / 132;
   overflow: hidden;
   border-radius: 8px;
   box-shadow:
@@ -3274,12 +3456,12 @@ th {
 
 /* —— Patient flow: calibration & pain/fatigue — soft landing-aligned surfaces — */
 .patient-experience .patient-flow-page {
-  width: min(100vw, 980px);
+  width: min(100vw, 1120px);
   margin: 0 auto;
-  gap: clamp(1.05rem, 2.8vw, 1.85rem);
-  padding: clamp(0.45rem, 2vw, 1.1rem)
-    clamp(0.75rem, 4vw, 2rem)
-    clamp(1.65rem, 6vw, 2.85rem);
+  gap: clamp(0.75rem, 1.6vw, 1.1rem);
+  padding: clamp(0.4rem, 1.2vw, 0.85rem)
+    clamp(0.75rem, 2.5vw, 1.5rem)
+    clamp(1rem, 3vw, 1.75rem);
   background:
     radial-gradient(ellipse 120% 80% at 18% -8%, rgba(37, 99, 235, 0.08), transparent 50%),
     radial-gradient(ellipse 90% 50% at 92% 12%, rgba(20, 184, 166, 0.07), transparent 46%),
@@ -3287,15 +3469,15 @@ th {
 }
 
 .patient-calibration-page.patient-flow-page {
-  max-width: 860px;
+  max-width: 1040px;
 }
 
 .patient-flow-shell {
-  width: min(100%, 800px);
+  width: min(100%, 900px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: clamp(1rem, 2.4vw, 1.65rem);
+  gap: clamp(0.72rem, 1.5vw, 1rem);
 }
 
 .patient-flow-shell--compact {
@@ -3303,11 +3485,11 @@ th {
 }
 
 .patient-calibration-page .patient-flow-shell {
-  width: min(100%, 800px);
+  width: min(100%, 900px);
 }
 
 .patient-calibration-page .cal-hero-card {
-  gap: clamp(1rem, 2.5vw, 1.5rem);
+  gap: clamp(0.8rem, 1.8vw, 1.15rem);
 }
 
 .patient-experience .patient-flow-page .surface.cal-hero-card,
@@ -3317,17 +3499,17 @@ th {
   border: none;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.86) inset,
-    0 22px 50px rgba(21, 32, 51, 0.08),
+    0 14px 34px rgba(21, 32, 51, 0.07),
     0 0 0 1px rgba(196, 211, 230, 0.45);
-  border-radius: 20px;
+  border-radius: 18px;
 }
 
 .cal-hero-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(220px, 0.92fr);
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.44fr);
   align-items: center;
-  padding: clamp(1.15rem, 2.8vw, 1.75rem);
-  gap: clamp(1rem, 3vw, 1.85rem);
+  padding: clamp(0.9rem, 1.9vw, 1.2rem);
+  gap: clamp(0.85rem, 2vw, 1.25rem);
   background:
     radial-gradient(circle at 12% -6%, rgba(59, 130, 246, 0.09), transparent 52%),
     linear-gradient(160deg, #ffffff 0%, #f4f9ff 100%);
@@ -3335,7 +3517,7 @@ th {
 
 .cal-hero-left {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.42rem;
   min-width: 0;
 }
 
@@ -3362,7 +3544,7 @@ th {
 
 .cal-hero-title {
   margin: 0;
-  font-size: clamp(1.5rem, 3.8vw, 2rem);
+  font-size: clamp(1.35rem, 2.8vw, 1.8rem);
   font-weight: 850;
   color: #0f172a;
   letter-spacing: -0.02em;
@@ -3372,9 +3554,9 @@ th {
 .cal-hero-copy {
   margin: 0;
   color: #5a6d82;
-  font-size: 0.95rem;
-  line-height: 1.55;
-  max-width: 38rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  max-width: 34rem;
 }
 
 .cal-hero-copy em {
@@ -3385,8 +3567,8 @@ th {
 
 .cal-progress-shell {
   display: grid;
-  gap: 0.4rem;
-  margin-top: 0.55rem;
+  gap: 0.32rem;
+  margin-top: 0.35rem;
 }
 
 .cal-progress-chip {
@@ -3403,7 +3585,7 @@ th {
 
 .cal-progress-bar {
   overflow: hidden;
-  height: 9px;
+  height: 7px;
   border-radius: 999px;
   background: rgba(241, 245, 249, 0.9);
 }
@@ -3416,8 +3598,27 @@ th {
 }
 
 .cal-hero-visual {
-  display: flex;
-  justify-content: center;
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  min-width: 0;
+}
+
+.cal-preview-canvas {
+  width: 100% !important;
+  height: 150px !important;
+  border-radius: 14px;
+  background: #172033;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 24px rgba(15, 23, 42, 0.14);
+}
+
+.cal-preview-caption {
+  margin: 0;
+  max-width: 16rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 .cal-hero-art-svg {
@@ -3599,7 +3800,7 @@ th {
 .cal-finger-panel {
   display: grid;
   gap: 0.95rem;
-  padding: clamp(1rem, 2.4vw, 1.35rem);
+  padding: clamp(0.85rem, 1.8vw, 1.1rem);
   background:
     radial-gradient(circle at 8% -10%, rgba(45, 212, 191, 0.1), transparent 54%),
     linear-gradient(170deg, #ffffff 0%, #f6fbfd 98%);
@@ -3608,21 +3809,21 @@ th {
 .cal-finger-panel__intro {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: flex-start;
+  gap: 0.65rem;
+  align-items: center;
   justify-content: space-between;
 }
 
 .cal-finger-panel__intro h3 {
-  margin: 0 0 0.35rem;
-  font-size: 1.06rem;
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
   font-weight: 850;
   color: #0f172a;
 }
 
 .cal-finger-panel__intro p {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   color: #5a6d82;
   line-height: 1.45;
   max-width: 42rem;
@@ -3631,19 +3832,19 @@ th {
 .cal-finger-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
+  gap: 0.42rem;
 }
 
 .cal-finger-pill {
   position: relative;
-  flex: 1 1 160px;
-  min-width: 140px;
+  flex: 1 1 132px;
+  min-width: 118px;
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.55rem 0.72rem;
-  border-radius: 14px;
+  gap: 0.32rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 12px;
   border: 1px solid rgba(226, 232, 240, 0.95);
   background: rgba(255, 255, 255, 0.86);
   text-align: left;
@@ -3665,8 +3866,8 @@ th {
 }
 
 .cal-finger-pill__ix {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border-radius: 10px;
@@ -3688,12 +3889,12 @@ th {
 
 .cal-finger-pill__name {
   font-weight: 850;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   color: #0f172a;
 }
 
 .cal-finger-pill__state {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3706,8 +3907,19 @@ th {
 
 .cal-footer-hint.safe-note {
   text-align: center;
-  padding: 0.25rem 0.5rem;
+  padding: 0.1rem 0.5rem;
   color: #0f766e;
+}
+
+.cal-page-actions {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.cal-page-actions .patient-flow-cta {
+  flex: 1 1 0;
+  min-height: 42px;
 }
 
 .calibration-modal-backdrop {
@@ -3715,8 +3927,8 @@ th {
   inset: 0;
   z-index: 80;
   display: grid;
-  place-items: center;
-  padding: clamp(1rem, 4vw, 2rem);
+  place-items: end center;
+  padding: clamp(0.8rem, 2.2vw, 1.2rem);
   background:
     radial-gradient(circle at 50% 24%, rgba(59, 130, 246, 0.2), transparent 36%),
     rgba(15, 23, 42, 0.55);
@@ -3727,11 +3939,11 @@ th {
 .calibration-modal-card {
   position: relative;
   overflow: hidden;
-  width: min(100%, 520px);
+  width: min(100%, 460px);
   display: grid;
-  gap: 0.9rem;
-  padding: clamp(1rem, 3vw, 1.35rem);
-  border-radius: 22px;
+  gap: 0.68rem;
+  padding: clamp(0.85rem, 2.2vw, 1.05rem);
+  border-radius: 18px;
   background:
     radial-gradient(circle at 20% -10%, rgba(125, 211, 252, 0.22), transparent 42%),
     linear-gradient(165deg, #ffffff 0%, #f6fbff 100%);
@@ -3787,13 +3999,13 @@ th {
   z-index: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.85rem;
+  gap: 0.65rem;
   align-items: center;
 }
 
 .calibration-modal-state {
-  width: 58px;
-  height: 58px;
+  width: 48px;
+  height: 48px;
   display: grid;
   place-items: center;
   border-radius: 18px;
@@ -3829,7 +4041,7 @@ th {
 
 .calibration-modal-head h3 {
   margin: 0;
-  font-size: clamp(1.25rem, 3.8vw, 1.8rem);
+  font-size: clamp(1.15rem, 2.8vw, 1.45rem);
   line-height: 1.1;
   letter-spacing: -0.02em;
   color: #0f172a;
@@ -3840,17 +4052,24 @@ th {
   z-index: 1;
   margin: 0;
   color: #526479;
-  font-size: 0.95rem;
-  line-height: 1.5;
+  font-size: 0.86rem;
+  line-height: 1.42;
 }
 
 .calibration-modal-preview {
   position: relative;
   z-index: 1;
-  border-radius: 18px;
-  padding: 0.35rem;
+  border-radius: 14px;
+  padding: 0.28rem;
   background: rgba(15, 23, 42, 0.08);
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.1);
+}
+
+.cal-modal-preview-canvas {
+  width: 100% !important;
+  height: 120px !important;
+  border-radius: 12px;
+  background: #172033;
 }
 
 .calibration-modal-hold {
@@ -3858,14 +4077,14 @@ th {
   z-index: 1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.9rem;
+  gap: 0.7rem;
   align-items: center;
 }
 
 .calibration-modal-ring {
   --cal-hold: 0%;
-  width: 74px;
-  height: 74px;
+  width: 60px;
+  height: 60px;
   display: grid;
   place-items: center;
   border-radius: 999px;
@@ -3908,13 +4127,14 @@ th {
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
+  gap: 0.5rem;
 }
 
 .calibration-modal-actions .primary-button,
 .calibration-modal-actions .secondary-button {
   flex: 1 1 180px;
   justify-content: center;
+  min-height: 40px;
 }
 
 @keyframes calibrationBackdropIn {
@@ -5199,6 +5419,37 @@ th {
   font-size: 2rem;
   font-weight: 900;
   pointer-events: auto;
+}
+
+.ball-3d-overlay__panel {
+  max-width: min(420px, 88%);
+  display: grid;
+  gap: 0.75rem;
+  justify-items: center;
+  padding: 1.25rem;
+  border-radius: 12px;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.ball-3d-overlay__panel h3,
+.ball-3d-overlay__panel p {
+  margin: 0;
+}
+
+.ball-3d-overlay__panel h3 {
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.ball-3d-overlay__panel p {
+  color: #475569;
+  line-height: 1.45;
 }
 
 .ball-game-board {
@@ -6586,23 +6837,31 @@ th {
 
 .bubble-board.bubble-pop-scene {
   position: relative;
-  min-height: min(336px, 56vh);
+  min-height: min(460px, 64vh);
   overflow: hidden;
   border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.38);
+  border: 1px solid rgba(125, 164, 202, 0.42);
   background:
-    radial-gradient(ellipse 118% 70% at 50% -4%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 48%),
+    radial-gradient(ellipse 100% 64% at 50% -12%, rgba(255, 255, 255, 0.82) 0%, rgba(255, 255, 255, 0) 55%),
     linear-gradient(
       174deg,
-      #e9f6ff 0%,
-      #e4f0fc 52%,
-      #dde9f9 82%,
-      #e6f2fb 100%
+      #edf7ff 0%,
+      #dcecff 48%,
+      #dbeafe 78%,
+      #e9f4ff 100%
     );
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.88) inset,
-    0 12px 32px rgba(15, 23, 42, 0.07),
-    0 3px 10px rgba(15, 23, 42, 0.04);
+    0 18px 46px rgba(30, 64, 120, 0.11),
+    0 4px 16px rgba(15, 23, 42, 0.06);
+  touch-action: none;
+}
+
+.bubble-board.bubble-pop-scene canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: inherit;
 }
 
 .bubble-pop-shell {
@@ -6741,6 +7000,18 @@ th {
   color: rgba(51, 65, 85, 0.9);
   background: rgba(241, 245, 249, 0.9);
   border: 1px solid rgba(226, 232, 240, 0.95);
+}
+
+.bubble-meta-chip--ok {
+  color: #047857;
+  background: rgba(209, 250, 229, 0.92);
+  border-color: rgba(110, 231, 183, 0.9);
+}
+
+.bubble-meta-chip--warn {
+  color: #9f1239;
+  background: rgba(255, 228, 230, 0.92);
+  border-color: rgba(253, 164, 175, 0.9);
 }
 
 .bubble-pop-progress {
@@ -6905,10 +7176,8 @@ th {
   margin: 0;
   padding: 0;
   transform: translate(-50%, -50%);
-  transition:
-    left 0.08s linear,
-    top 0.08s linear,
-    filter 0.2s ease;
+  transition: filter 0.2s ease;
+  will-change: left, top;
   contain: layout;
 }
 
@@ -6999,9 +7268,17 @@ th {
   width: clamp(72px, 9.5vmin, 120px);
   height: clamp(72px, 9.5vmin, 120px);
   aspect-ratio: 1;
-  transform: translate(-50%, -50%) scale(var(--bubble-scale, 1));
+  transform:
+    translate(-50%, -50%)
+    translateY(calc(var(--bubble-depth, 0) * -22px))
+    scale(var(--bubble-scale, 1));
   cursor: pointer;
   background: transparent;
+  filter: drop-shadow(0 calc(12px + var(--bubble-depth, 0) * 8px) 16px rgba(15, 23, 42, 0.18));
+  transition:
+    left 0.22s linear,
+    top 0.22s linear,
+    filter 0.18s ease;
 }
 
 .bubble-pop-hit:focus-visible {
@@ -7041,6 +7318,26 @@ th {
 .bubble-pop-hit--fx-ok {
   animation: bubblePopTapOk 0.34s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 3;
+}
+
+.bubble-pop-hit--popping {
+  z-index: 8;
+  pointer-events: none;
+  animation: bubblePopBurstOut 0.46s ease-out forwards;
+}
+
+.bubble-pop-hit--popping .bubble-pop-hit__shell::after {
+  animation: bubbleSuccessGlow 0.42s ease;
+}
+
+.bubble-pop-hit--bad {
+  z-index: 7;
+  pointer-events: none;
+  animation: bubblePopReject 0.42s ease-out forwards;
+}
+
+.bubble-pop-hit--bad .bubble-pop-hit__shell::after {
+  animation: bubbleDecoyShake 0.34s ease, bubbleDecoyFlash 0.34s ease;
 }
 
 .bubble-pop-hit--fx-ok .bubble-pop-hit__shell::after {
@@ -7167,13 +7464,69 @@ th {
 @keyframes bubblePopTapOk {
   0%,
   100% {
-    transform: translate(-50%, -50%) scale(var(--bubble-scale, 1));
+    transform:
+      translate(-50%, -50%)
+      translateY(calc(var(--bubble-depth, 0) * -22px))
+      scale(var(--bubble-scale, 1));
     opacity: 1;
   }
 
   55% {
-    transform: translate(-50%, -50%) scale(calc(var(--bubble-scale, 1) * 0.9));
+    transform:
+      translate(-50%, -50%)
+      translateY(calc(var(--bubble-depth, 0) * -22px))
+      scale(calc(var(--bubble-scale, 1) * 0.9));
     opacity: 0.93;
+  }
+}
+
+@keyframes bubblePopBurstOut {
+  0% {
+    transform:
+      translate(-50%, -50%)
+      translateY(calc(var(--bubble-depth, 0) * -22px))
+      scale(var(--bubble-scale, 1));
+    opacity: 1;
+  }
+
+  64% {
+    transform:
+      translate(-50%, -50%)
+      translateY(calc(var(--bubble-depth, 0) * -30px - 8px))
+      scale(calc(var(--bubble-scale, 1) * 1.22));
+    opacity: 0.82;
+  }
+
+  100% {
+    transform:
+      translate(-50%, -50%)
+      translateY(calc(var(--bubble-depth, 0) * -34px - 16px))
+      scale(calc(var(--bubble-scale, 1) * 1.52));
+    opacity: 0;
+  }
+}
+
+@keyframes bubblePopReject {
+  0%,
+  100% {
+    transform:
+      translate(-50%, -50%)
+      translateY(calc(var(--bubble-depth, 0) * -22px))
+      scale(var(--bubble-scale, 1));
+  }
+
+  28% {
+    transform:
+      translate(calc(-50% - 8px), -50%)
+      translateY(calc(var(--bubble-depth, 0) * -22px))
+      scale(calc(var(--bubble-scale, 1) * 0.96));
+  }
+
+  68% {
+    transform:
+      translate(calc(-50% + 7px), -50%)
+      translateY(calc(var(--bubble-depth, 0) * -22px))
+      scale(calc(var(--bubble-scale, 1) * 1.02));
   }
 }
 
@@ -7241,8 +7594,69 @@ th {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
+.bubble-pop-burst {
+  position: absolute;
+  z-index: 44;
+  width: clamp(82px, 10vmin, 132px);
+  height: clamp(82px, 10vmin, 132px);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: bubblePopScreenBurst 0.68s ease-out forwards;
+}
+
+.bubble-pop-burst::before,
+.bubble-pop-burst::after {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  border-radius: inherit;
+}
+
+.bubble-pop-burst::before {
+  border: 2px solid rgba(125, 211, 252, 0.72);
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.32);
+}
+
+.bubble-pop-burst::after {
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 255, 255, 0.94) 0 4px, transparent 5px),
+    radial-gradient(circle at 78% 32%, rgba(186, 230, 253, 0.9) 0 3px, transparent 4px),
+    radial-gradient(circle at 70% 78%, rgba(147, 197, 253, 0.86) 0 3px, transparent 4px),
+    radial-gradient(circle at 24% 68%, rgba(224, 242, 254, 0.88) 0 4px, transparent 5px);
+}
+
+.bubble-pop-burst--bad::before {
+  border-color: rgba(251, 113, 133, 0.72);
+  box-shadow: 0 0 28px rgba(244, 63, 94, 0.24);
+}
+
+.bubble-pop-burst--bad::after {
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 228, 230, 0.94) 0 4px, transparent 5px),
+    radial-gradient(circle at 78% 32%, rgba(253, 164, 175, 0.9) 0 3px, transparent 4px),
+    radial-gradient(circle at 70% 78%, rgba(251, 113, 133, 0.86) 0 3px, transparent 4px),
+    radial-gradient(circle at 24% 68%, rgba(255, 228, 230, 0.88) 0 4px, transparent 5px);
+}
+
+@keyframes bubblePopScreenBurst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.58);
+  }
+
+  36% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.65);
+  }
+}
+
 .patient-game-shell:fullscreen .game-board.bubble-board.bubble-pop-scene {
-  min-height: min(54vh, 520px);
+  min-height: min(66vh, 640px);
   flex: 1 1 auto;
 }
 
@@ -7404,6 +7818,96 @@ th {
   background: #eef4f7;
   font-size: 0.82rem;
   font-weight: 850;
+}
+
+.carrom-coach-card {
+  position: absolute;
+  right: 14px;
+  bottom: 56px;
+  left: auto;
+  z-index: 22;
+  width: min(380px, calc(100% - 28px));
+  padding: 0.78rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  color: #f8fafc;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 64, 175, 0.78));
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.36);
+  pointer-events: none;
+}
+
+.carrom-coach-card--placement-locked,
+.carrom-coach-card--direction-locked {
+  background: linear-gradient(135deg, rgba(20, 83, 45, 0.9), rgba(22, 101, 52, 0.76));
+}
+
+.carrom-coach-card--armed {
+  background: linear-gradient(135deg, rgba(124, 45, 18, 0.93), rgba(234, 88, 12, 0.78));
+  box-shadow: 0 14px 34px rgba(234, 88, 12, 0.26);
+}
+
+.carrom-coach-card__steps {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.carrom-coach-card__steps span {
+  border-radius: 999px;
+  padding: 0.18rem 0.42rem;
+  color: rgba(248, 250, 252, 0.78);
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.carrom-coach-card__steps span.active {
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.carrom-coach-card__title,
+.carrom-coach-card__copy,
+.carrom-coach-card__hint {
+  display: block;
+}
+
+.carrom-coach-card__title {
+  margin-bottom: 0.25rem;
+  font-size: 0.86rem;
+}
+
+.carrom-coach-card__copy {
+  color: rgba(248, 250, 252, 0.92);
+  font-size: 0.79rem;
+  line-height: 1.35;
+}
+
+.carrom-coach-card__hint {
+  margin-top: 0.45rem;
+  color: #bfdbfe;
+  font-size: 0.72rem;
+}
+
+.carrom-coach-card--placement-locked .carrom-coach-card__hint,
+.carrom-coach-card--direction-locked .carrom-coach-card__hint {
+  color: #bbf7d0;
+}
+
+.carrom-coach-card--armed .carrom-coach-card__hint {
+  color: #fed7aa;
+}
+
+.carrom-coach-card__meter {
+  margin-top: 0.6rem;
+}
+
+.carrom-coach-card__meter > div {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .carrom-status-bar {
@@ -7616,6 +8120,36 @@ th {
   }
 
   .search-box {
+    width: 100%;
+  }
+
+  .patient-roster-heading {
+    align-items: flex-start;
+  }
+
+  .patient-roster-search {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .patient-roster-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-roster-card {
+    min-height: 0;
+  }
+
+  .patient-roster-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .patient-roster-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .patient-roster-action {
     width: 100%;
   }
 
@@ -8691,6 +9225,29 @@ th {
   color: var(--color-indigo-dark);
 }
 
+.patient-experience .patient-calibration-page {
+  align-items: center;
+}
+
+.patient-experience .patient-calibration-page .cal-hero-card,
+.patient-experience .patient-calibration-page .cal-live-panel {
+  border: 1px solid rgba(198, 214, 234, 0.72);
+  background:
+    radial-gradient(circle at 12% -6%, rgba(59, 130, 246, 0.08), transparent 48%),
+    linear-gradient(160deg, #ffffff 0%, #f7fbff 100%);
+  box-shadow: 0 14px 34px rgba(15, 46, 75, 0.07);
+}
+
+.patient-experience .patient-calibration-page .cal-live-panel {
+  padding: clamp(0.8rem, 1.7vw, 1.05rem);
+}
+
+.patient-experience .patient-calibration-page .patient-flow-primary:disabled {
+  color: #7a8798 !important;
+  background: #edf2f7 !important;
+  border: 1px solid #d7e0ec !important;
+}
+
 /* Animations */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes fadeUp {
@@ -8725,6 +9282,15 @@ th {
     }
     100% {
       transform: scale(1);
+    }
+  }
+
+  @keyframes rosterSkeleton {
+    0% {
+      background-position: 120% 0;
+    }
+    100% {
+      background-position: -120% 0;
     }
   }
 
@@ -8956,6 +9522,36 @@ th {
   border-color: rgba(20, 184, 166, 0.45);
   background: rgba(20, 184, 166, 0.16);
   color: #0f766e;
+}
+
+.patient-exercise-summary-card p {
+  margin: 0;
+  color: var(--muted-text);
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.exercise-detail-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+.exercise-detail-result-grid span {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted-text);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.exercise-detail-result-grid strong {
+  color: var(--patient-ink);
+  font-size: 1.12rem;
 }
 
 .patient-exercise-session {

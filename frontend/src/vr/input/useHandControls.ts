@@ -6,7 +6,10 @@ const xRange = 4.2;
 const zRange = 3.2;
 const depthStep = 0.18;
 
-export function useHandControls(stageRef: RefObject<HTMLElement>) {
+export function useHandControls(
+  stageRef: RefObject<HTMLElement>,
+  { positionEnabled = true, gestureEnabled = true } = {}
+) {
   const setHandPosition = useGameStore((state) => state.setHandPosition);
   const setGestureEvent = useGameStore((state) => state.setGestureEvent);
   const pointer = useRef({ x: 0, z: 0 });
@@ -19,6 +22,7 @@ export function useHandControls(stageRef: RefObject<HTMLElement>) {
     }
 
     function onPointerMove(event: PointerEvent) {
+      if (!positionEnabled) return;
       const bounds = stageRef.current?.getBoundingClientRect();
       const width = bounds?.width ?? window.innerWidth;
       const height = bounds?.height ?? window.innerHeight;
@@ -35,6 +39,7 @@ export function useHandControls(stageRef: RefObject<HTMLElement>) {
     }
 
     function onPointerDown(event: PointerEvent) {
+      if (!gestureEnabled) return;
       if (event.button !== 0) return;
       onPointerMove(event);
 
@@ -49,6 +54,7 @@ export function useHandControls(stageRef: RefObject<HTMLElement>) {
     }
 
     function onPointerUp(event: PointerEvent) {
+      if (!gestureEnabled) return;
       onPointerMove(event);
 
       const stage = stageRef.current;
@@ -99,5 +105,5 @@ export function useHandControls(stageRef: RefObject<HTMLElement>) {
       window.removeEventListener("pointercancel", onPointerUp);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [setGestureEvent, setHandPosition, stageRef]);
+  }, [setGestureEvent, setHandPosition, stageRef, positionEnabled, gestureEnabled]);
 }

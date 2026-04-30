@@ -3,8 +3,11 @@ import { useEffect, useRef } from "react";
 import type { GestureEvent, Patient } from "../types";
 import { RehabScene } from "./components/RehabScene";
 import { SessionHud } from "./components/SessionHud";
+import { InputOverlay } from "./components/InputOverlay";
 import { useHandControls } from "./input/useHandControls";
 import { useKeyboardGestureControls } from "./input/useKeyboardGestureControls";
+import { useMediaPipeHands } from "./input/useMediaPipeHands";
+import { useSerialGlove } from "./input/useSerialGlove";
 import { useGameStore } from "./state/gameStore";
 
 export function VrGamePage({ patient, currentEvent }: { patient: Patient; currentEvent: GestureEvent }) {
@@ -12,7 +15,13 @@ export function VrGamePage({ patient, currentEvent }: { patient: Patient; curren
   const setPatientId = useGameStore((state) => state.setPatientId);
   const setGestureEvent = useGameStore((state) => state.setGestureEvent);
 
-  useHandControls(stageRef);
+  const camera = useMediaPipeHands();
+  const glove = useSerialGlove();
+
+  useHandControls(stageRef, {
+    positionEnabled: !camera.isActive,
+    gestureEnabled: !glove.isConnected,
+  });
   useKeyboardGestureControls();
 
   useEffect(() => {
@@ -41,6 +50,7 @@ export function VrGamePage({ patient, currentEvent }: { patient: Patient; curren
         </Canvas>
       </section>
       <SessionHud patientName={patient.name} />
+      <InputOverlay glove={glove} camera={camera} />
     </section>
   );
 }

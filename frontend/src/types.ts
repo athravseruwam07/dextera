@@ -101,6 +101,8 @@ export interface RehabSession {
   fatigueWarnings: number;
   notes: string;
   events: GestureEvent[];
+  syncStatus?: "synced" | "pending" | "local-only";
+  syncMessage?: string;
 }
 
 export interface Patient {
@@ -296,6 +298,15 @@ export interface CalibrationData {
   steps: Partial<Record<CalibrationStep, FingerBends>>;
   fingerTaps: Partial<Record<FingerName, FingerBends>>;
   fingerTapProfiles?: Partial<Record<FingerName, FingerTapCalibrationProfile>>;
+  carromFlickProfile?: {
+    finger: "index" | "middle";
+    comfortableFlickSpeed: number;
+    minFlickSpeed: number;
+    maxFlickSpeed: number;
+    flickCount: number;
+    sampleCount: number;
+    capturedAt: string;
+  };
   thresholds: {
     openAverage: number;
     fistAverage: number;
@@ -325,4 +336,8 @@ export interface SessionResult {
   events: GestureEvent[];
   encouragement: string;
   savedAt?: string;
+  syncStatus?: "synced" | "pending" | "local-only";
+  syncedAt?: string;
+  syncMessage?: string;
+  backendSessionId?: string;
 }
