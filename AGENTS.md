@@ -116,7 +116,7 @@ Therapist Settings are opened from the top-right gear dropdown, not the sidebar 
 
 Doctor Dashboard in `src/App.tsx` uses compact top metric tiles and caps the Alerts needing review / Upcoming appointments previews at two items each. `View x+ more` opens a centered scrollable modal that preserves patient navigation actions.
 
-Theme mode is disabled in the UI. `App.tsx` forces `data-theme="light"` and removes the old `dextera.theme` localStorage value on mount so saved dark mode cannot leak into doctor or patient screens.
+Theme mode is disabled in the UI. `App.tsx` forces `data-theme="light"` and removes the old `dextera.theme` localStorage value on mount so saved dark mode cannot leak into doctor or patient screens. `frontend/src/styles.css` now uses a surgical Rehabilitation Studio theme layer: root tokens remap the legacy palette, scoped component overrides restyle clinician/patient surfaces, and existing page layout rules are preserved rather than rewritten.
 
 Patient portal uses its own shell in `frontend/src/patient/PatientExperience.tsx`: Dextera brand in a left sidebar, vertical Plan / Calendar / Recovery Progress / Assistant navigation, and a top-right Settings dropdown containing Accessibility and Exit. Recovery Progress uses existing saved patient session results and roster sessions to show patient-facing accuracy, reps, pain/fatigue, game progress, and recent-session trends.
 

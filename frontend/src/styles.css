@@ -1,39 +1,103 @@
+/*
+  Rehabilitation Studio theme.
+  Palette: warm base, stone surfaces, indigo product accent, semantic clinical states.
+  Font: Inter with system fallback.
+  Motion: reduced-motion aware fade/lift only.
+  Scope: layout rules below are legacy-preserved; theme rules use existing page/component classes and avoid page-container layout changes.
+*/
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+
 :root {
   color-scheme: light;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  color: #111827;
-  background: #f6f8fb;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --bg: #f6f8fb;
-  --surface-muted: #f1f5f9;
-  --text: #111827;
-  --text-muted: #64748b;
-  --border: #dbe3ea;
-  --primary: #2563eb;
-  --primary-dark: #1d4ed8;
-  --success: #16a34a;
-  --warning: #f59e0b;
-  --danger: #dc2626;
+
+  --color-base: #FAFAF7;
+  --color-surface: #ECEAE4;
+  --color-surface-alt: #F3F1EB;
+  --color-text-primary: #1C1C1A;
+  --color-text-secondary: #5A5A56;
+  --color-text-tertiary: #9A9A94;
+  --color-indigo: #5B4FCF;
+  --color-indigo-dark: #3D34A5;
+  --color-indigo-light: #EAE8F9;
+  --color-indigo-mid: #8C83DE;
+  --color-amber: #F0B429;
+  --color-amber-dark: #B8861A;
+  --color-amber-light: #FDF3D7;
+  --color-success: #3A8C5C;
+  --color-success-light: #E6F4EC;
+  --color-danger: #D94F3D;
+  --color-danger-light: #FCECEA;
+  --color-warning: #E07B28;
+  --color-warning-light: #FEF0E4;
+  --color-border: rgba(28,28,26,0.10);
+  --color-border-strong: rgba(28,28,26,0.20);
+
+  --color-white: #FFFFFF;
+  --color-indigo-ghost-hover: #D8D4F5;
+  --color-danger-action: #B83C2C; /* contrast fix: white on default danger fails AA */
+  --color-placeholder: #74746E; /* contrast fix: original tertiary placeholder fails on white */
+  --color-amber-text: #8A6413; /* contrast fix: amber-dark on amber-light fails AA */
+  --color-danger-text: #A63A2E; /* contrast fix: danger on danger-light fails AA */
+  --color-warning-text: #9B531C; /* contrast fix: warning on warning-light fails AA */
+  --color-success-text: #2C6F48; /* contrast fix: success on success-light fails AA */
+  --focus-ring-indigo: rgba(91,79,207,0.50);
+  --focus-ring-indigo-soft: rgba(91,79,207,0.25);
+  --focus-ring-indigo-input: rgba(91,79,207,0.15);
+  --focus-ring-danger-input: rgba(217,79,61,0.12);
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 26px;
+  --text-2xl: 34px;
+  --text-3xl: 44px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
   --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --shadow-card: 0 10px 28px rgba(15, 23, 42, 0.06);
-  --ink: var(--text);
-  --muted: var(--text-muted);
-  --line: var(--border);
-  --surface: #ffffff;
-  --panel: #f8fafc;
-  --blue: #2563eb;
-  --teal: #0f766e;
-  --amber: #f59e0b;
-  --red: #dc2626;
-  --violet: #7c3aed;
-  --radius: 8px;
-  --shadow: var(--shadow-card);
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  --bg: var(--color-base);
+  --surface-muted: var(--color-surface-alt);
+  --text: var(--color-text-primary);
+  --text-muted: var(--color-text-secondary);
+  --border: var(--color-border);
+  --primary: var(--color-indigo);
+  --primary-dark: var(--color-indigo-dark);
+  --success: var(--color-success-text);
+  --warning: var(--color-warning-text);
+  --danger: var(--color-danger-text);
+  --shadow-card: none;
+  --ink: var(--color-text-primary);
+  --muted: var(--color-text-secondary);
+  --line: var(--color-border);
+  --surface: var(--color-surface);
+  --panel: var(--color-surface-alt);
+  --blue: var(--color-indigo);
+  --teal: var(--color-indigo);
+  --amber: var(--color-amber-dark);
+  --red: var(--color-danger-text);
+  --violet: var(--color-indigo-mid);
+  --radius: var(--radius-md);
+  --shadow: none;
 }
 
 * {
@@ -49,6 +113,11 @@ body,
 
 body {
   background: var(--bg);
+  color: var(--color-text-primary);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: var(--text-base);
+  font-weight: 400;
+  line-height: 1.65;
 }
 
 button,
@@ -7946,204 +8015,585 @@ th {
   }
 }
 
-html[data-theme="dark"] {
-  color-scheme: dark;
-  color: #e5edf7;
-  background: #0f172a;
-  --bg: #0f172a;
-  --surface-muted: #1e293b;
-  --text: #e5edf7;
-  --text-muted: #94a3b8;
-  --border: #334155;
-  --primary: #60a5fa;
-  --primary-dark: #93c5fd;
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
-  --shadow-card: 0 18px 38px rgba(0, 0, 0, 0.22);
-  --ink: var(--text);
-  --muted: var(--text-muted);
-  --line: var(--border);
-  --surface: #111827;
-  --panel: #1e293b;
-  --blue: #60a5fa;
-  --teal: #5eead4;
-  --amber: #fbbf24;
-  --red: #f87171;
-  --violet: #a78bfa;
-  --shadow: var(--shadow-card);
+/* Navigation components */
+.landing-page,
+.login-screen,
+.app-shell,
+.workspace,
+.patient-experience,
+.patient-portal-workspace,
+.patient-game-shell,
+.vr-page {
+  background-color: var(--color-base);
+  color: var(--color-text-primary);
 }
 
-html[data-theme="dark"] body,
-html[data-theme="dark"] #root,
-html[data-theme="dark"] .app-shell,
-html[data-theme="dark"] .workspace,
-html[data-theme="dark"] .landing-page,
-html[data-theme="dark"] .login-screen,
-html[data-theme="dark"] .patient-experience,
-html[data-theme="dark"] .patient-portal-workspace,
-html[data-theme="dark"] .patient-game-shell {
-  background: var(--bg);
-  color: var(--text);
+.landing-page :is(h1, h2, h3, p, span, strong, small),
+.login-screen :is(h1, h2, h3, p, span, strong, small, label),
+.workspace :is(h1, h2, h3, p, span, strong, small, label),
+.patient-experience :is(h1, h2, h3, p, span, strong, small, label),
+.vr-page :is(h1, h2, h3, p, span, strong, small, label) {
+  color: inherit;
 }
 
-html[data-theme="dark"] input,
-html[data-theme="dark"] select,
-html[data-theme="dark"] textarea,
-html[data-theme="dark"] .patient-tabs,
-html[data-theme="dark"] .patient-game-stage-wrap,
-html[data-theme="dark"] .game-board,
-html[data-theme="dark"] .ball-3d-board,
-html[data-theme="dark"] .bubble-pop-scene,
-html[data-theme="dark"] .piano-playfield,
-html[data-theme="dark"] .piano-lanes-board,
-html[data-theme="dark"] .carrom-board {
-  border-color: var(--line);
-  background: #0f172a;
-  color: var(--ink);
+.landing-page p,
+.login-screen p,
+.workspace p,
+.patient-experience p,
+.vr-page p,
+.care-goal,
+.patient-goal,
+.clinical-note,
+.safe-note {
+  color: var(--color-text-secondary);
 }
 
-html[data-theme="dark"] label,
-html[data-theme="dark"] .patient-goal,
-html[data-theme="dark"] .care-goal,
-html[data-theme="dark"] .sidebar nav button,
-html[data-theme="dark"] .patient-tabs button,
-html[data-theme="dark"] .summary-metrics span,
-html[data-theme="dark"] .chart-label,
-html[data-theme="dark"] .chart-axis {
-  color: var(--muted);
+.landing-page :is(h1, h2, h3),
+.login-screen :is(h1, h2, h3),
+.workspace :is(h1, h2, h3),
+.patient-experience :is(h1, h2, h3) {
+  color: var(--color-text-primary);
+  font-weight: 600;
 }
 
-html[data-theme="dark"] .sidebar,
-html[data-theme="dark"] .patient-portal-sidebar,
-html[data-theme="dark"] .topbar,
-html[data-theme="dark"] .patient-portal-topbar,
-html[data-theme="dark"] .settings-dropdown,
-html[data-theme="dark"] .dashboard-modal-panel,
-html[data-theme="dark"] .settings-modal-panel,
-html[data-theme="dark"] .surface,
-html[data-theme="dark"] .patient-card,
-html[data-theme="dark"] .metric-card,
-html[data-theme="dark"] .list-card,
-html[data-theme="dark"] .recommendation-card,
-html[data-theme="dark"] .chart-card,
-html[data-theme="dark"] .dashboard-list-panel,
-html[data-theme="dark"] .profile-hero,
-html[data-theme="dark"] .patient-summary-card,
-html[data-theme="dark"] .patient-hero,
-html[data-theme="dark"] .assignment-card,
-html[data-theme="dark"] .rg-shell,
-html[data-theme="dark"] .rg-catalog,
-html[data-theme="dark"] .pregame-panel,
-html[data-theme="dark"] .pregame-hero,
-html[data-theme="dark"] .tutorial-page,
-html[data-theme="dark"] .cal-hero-card,
-html[data-theme="dark"] .cal-gesture-card,
-html[data-theme="dark"] .cal-finger-panel,
-html[data-theme="dark"] .checkin-sheet,
-html[data-theme="dark"] .results-panel,
-html[data-theme="dark"] .assistant-panel,
-html[data-theme="dark"] .game-header-panel,
-html[data-theme="dark"] .piano-hero,
-html[data-theme="dark"] .piano-board,
-html[data-theme="dark"] .bubble-pop-hud,
-html[data-theme="dark"] .game-completion-card,
-html[data-theme="dark"] .vr-stage,
-html[data-theme="dark"] .vr-session-hud {
-  border-color: var(--line);
-  background: var(--surface);
-  color: var(--text);
+.landing-page :is(h1, h2),
+.login-screen h1,
+.page-heading h2,
+.patient-hero h2,
+.pregame-hero-title,
+.cal-hero-title,
+.checkin-title {
+  letter-spacing: -0.01em;
 }
 
-html[data-theme="dark"] .topbar,
-html[data-theme="dark"] .patient-portal-topbar,
-html[data-theme="dark"] .sidebar,
-html[data-theme="dark"] .patient-portal-sidebar {
-  background: rgba(15, 23, 42, 0.94);
+.landing-nav,
+.topbar,
+.patient-portal-topbar {
+  background-color: var(--color-white);
+  border-bottom-color: var(--color-border);
 }
 
-html[data-theme="dark"] .patient-portal-shell {
-  background:
-    radial-gradient(circle at 14% -8%, rgba(94, 234, 212, 0.1), transparent 30%),
-    var(--bg);
+.landing-brand,
+.sidebar-brand,
+.brand-mark,
+.eyebrow,
+.landing-kicker {
+  color: var(--color-indigo-dark);
 }
 
-html[data-theme="dark"] .patient-portal-sidebar .sidebar-brand strong,
-html[data-theme="dark"] .patient-portal-topbar strong {
-  color: var(--text);
+.sidebar,
+.patient-portal-sidebar {
+  background-color: var(--color-surface);
+  border-color: var(--color-border);
 }
 
-html[data-theme="dark"] .patient-portal-sidebar .sidebar-brand span,
-html[data-theme="dark"] .patient-portal-topbar p,
-html[data-theme="dark"] .patient-side-nav button {
-  color: var(--muted);
+.sidebar nav button,
+.patient-side-nav button {
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
-html[data-theme="dark"] .patient-side-nav button:hover,
-html[data-theme="dark"] .patient-side-nav button.active {
-  border-color: rgba(94, 234, 212, 0.26);
-  color: var(--teal);
-  background: rgba(94, 234, 212, 0.1);
+.sidebar nav button:hover,
+.patient-side-nav button:hover {
+  background-color: var(--color-surface-alt);
+  color: var(--color-text-primary);
+}
+
+.sidebar nav button.active,
+.patient-side-nav button.active {
+  border-left: 3px solid var(--color-indigo);
+  background-color: var(--color-indigo-light);
+  color: var(--color-indigo-dark);
+}
+
+/* Buttons */
+.primary-button,
+.landing-page .primary-button,
+.login-panel .primary-button,
+.patient-experience .primary-button,
+.patient-game-shell .primary-button,
+.vr-page .primary-button {
+  min-height: 44px;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-indigo);
+  color: var(--color-white);
+  font-size: var(--text-sm);
+  font-weight: 600;
   box-shadow: none;
 }
 
-html[data-theme="dark"] .secondary-button,
-html[data-theme="dark"] .toggle-button,
-html[data-theme="dark"] .icon-button,
-html[data-theme="dark"] .compact-game-button,
-html[data-theme="dark"] .patient-experience .secondary-button,
-html[data-theme="dark"] .patient-game-shell .secondary-button,
-html[data-theme="dark"] .patient-experience .toggle-button,
-html[data-theme="dark"] .patient-game-shell .toggle-button {
-  border-color: var(--line);
-  background: var(--panel);
-  color: var(--ink);
+.primary-button:hover,
+.landing-page .primary-button:hover,
+.login-panel .primary-button:hover,
+.patient-experience .primary-button:hover,
+.patient-game-shell .primary-button:hover,
+.vr-page .primary-button:hover {
+  background: var(--color-indigo-dark);
 }
 
-html[data-theme="dark"] .primary-button,
-html[data-theme="dark"] .patient-experience .primary-button,
-html[data-theme="dark"] .patient-game-shell .primary-button {
-  color: #0f172a;
-  background: var(--primary);
+.secondary-button,
+.toggle-button,
+.icon-button,
+.compact-game-button,
+.patient-experience .secondary-button,
+.patient-game-shell .secondary-button {
+  min-height: 44px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-primary);
+  box-shadow: none;
 }
 
-html[data-theme="dark"] .settings-dropdown button,
-html[data-theme="dark"] .settings-dropdown-danger {
-  color: var(--ink);
+.secondary-button:hover,
+.toggle-button:hover,
+.icon-button:hover,
+.compact-game-button:hover,
+.patient-experience .secondary-button:hover,
+.patient-game-shell .secondary-button:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
 }
 
-html[data-theme="dark"] .settings-dropdown-danger,
-html[data-theme="dark"] .text-danger {
-  color: var(--danger);
+.link-button,
+.dashboard-more-link,
+.toggle-button.is-on,
+.glass-button {
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  background: var(--color-indigo-light);
+  color: var(--color-indigo-dark);
+  box-shadow: none;
 }
 
-html[data-theme="dark"] .empty-state,
-html[data-theme="dark"] .inline-alert,
-html[data-theme="dark"] .step-card,
-html[data-theme="dark"] .event-chip,
-html[data-theme="dark"] .finger-row,
-html[data-theme="dark"] .calendar-mini,
-html[data-theme="dark"] .doctor-instructions,
-html[data-theme="dark"] .rg-snapshot-row,
-html[data-theme="dark"] .pregame-guidance-block,
-html[data-theme="dark"] .pregame-step-row,
-html[data-theme="dark"] .tutorial-step-card,
-html[data-theme="dark"] .cal-finger-card,
-html[data-theme="dark"] .bubble-pop-stat-chips__item,
-html[data-theme="dark"] .piano-metrics__item,
-html[data-theme="dark"] .game-completion-mini {
-  border-color: var(--line);
-  background: var(--panel);
-  color: var(--text);
+.link-button:hover,
+.dashboard-more-link:hover,
+.toggle-button.is-on:hover,
+.glass-button:hover {
+  background: var(--color-indigo-ghost-hover);
 }
 
-html[data-theme="dark"] .dashboard-modal-backdrop,
-html[data-theme="dark"] .settings-modal-backdrop,
-html[data-theme="dark"] .game-completion-backdrop {
-  background: rgba(2, 6, 23, 0.78);
+.danger-button,
+.settings-dropdown-danger {
+  background: var(--color-danger-action);
+  color: var(--color-white);
 }
 
-/* Doctor dashboard restore: keep top metrics horizontal after generic responsive metric rules. */
+.danger-button:hover {
+  background: var(--color-danger-action);
+}
+
+.workspace :is(button, .primary-button, .secondary-button, .toggle-button, .icon-button, .link-button),
+.landing-page :is(button, .primary-button, .secondary-button),
+.login-screen :is(button, .primary-button, .secondary-button) {
+  min-height: 44px;
+}
+
+.patient-experience :is(button, .primary-button, .secondary-button, .toggle-button, .icon-button, .link-button),
+.patient-game-shell :is(button, .primary-button, .secondary-button, .toggle-button, .icon-button, .link-button) {
+  min-height: 52px; /* patient: larger tap targets for limited dexterity */
+}
+
+:is(button, a, input, select, textarea, summary):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring-indigo);
+}
+
+/* Form inputs */
+.login-panel :is(input, select, textarea),
+.inline-form :is(input, select, textarea),
+.assistant-form :is(input, select, textarea),
+.settings-modal-panel :is(input, select, textarea),
+.search-box input {
+  min-height: 42px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  color: var(--color-text-primary);
+  font-size: var(--text-base);
+}
+
+.patient-experience :is(input, select, textarea),
+.patient-game-shell :is(input, select, textarea) {
+  min-height: 48px; /* patient: accessible input target */
+  font-size: var(--text-base);
+}
+
+.login-panel :is(input, select, textarea)::placeholder,
+.inline-form :is(input, select, textarea)::placeholder,
+.assistant-form :is(input, select, textarea)::placeholder {
+  color: var(--color-placeholder);
+}
+
+.login-panel :is(input, select, textarea):focus,
+.inline-form :is(input, select, textarea):focus,
+.assistant-form :is(input, select, textarea):focus {
+  border-color: var(--color-indigo);
+  box-shadow: 0 0 0 3px var(--focus-ring-indigo-input);
+}
+
+.login-panel :is(input, select, textarea)[aria-invalid="true"],
+.inline-form :is(input, select, textarea)[aria-invalid="true"],
+.assistant-form :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  box-shadow: 0 0 0 3px var(--focus-ring-danger-input);
+}
+
+/* Cards */
+.surface,
+.patient-card,
+.metric-card,
+.list-card,
+.recommendation-card,
+.chart-card,
+.dashboard-list-panel,
+.settings-dropdown,
+.settings-modal-panel,
+.dashboard-modal-panel,
+.calendar-mini,
+.doctor-instructions,
+.tutorial-step-card,
+.progress-game-row,
+.assistant-message,
+.vr-session-hud {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: none;
+}
+
+.patient-hero,
+.profile-hero,
+.login-panel,
+.preview-card,
+.pregame-hero,
+.cal-hero-card,
+.checkin-sheet,
+.results-panel,
+.game-completion-card {
+  border-color: var(--color-border);
+  background: var(--color-white);
+  color: var(--color-text-primary);
+  box-shadow: none;
+}
+
+.metric-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-base);
+}
+
+.metric-card > span,
+.metric-card small {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  color: var(--color-text-primary);
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
+.metric-icon,
+.avatar,
+.assignment-icon,
+.brand-mark {
+  background: var(--color-indigo-light);
+  color: var(--color-indigo-dark);
+}
+
+.workspace .tone-amber .metric-icon {
+  background: var(--color-indigo-light);
+  color: var(--color-indigo-dark);
+}
+
+.patient-experience .tone-amber .metric-icon,
+.patient-experience .tone-amber {
+  background: var(--color-amber-light);
+  color: var(--color-amber-text);
+}
+
+/* Badges and chips */
+.status-pill,
+.gesture-badge,
+.severity-badge,
+.pregame-chip,
+.pregame-mini-badge,
+.rg-game-minichip,
+.cal-status,
+.cal-progress-chip,
+.checkin-value-pill,
+.piano-status-pill,
+.bubble-meta-chip {
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-active,
+.status-assigned,
+.status-scheduled,
+.gesture-open,
+.gesture-tap,
+.cal-status--next {
+  background: var(--color-indigo-light);
+  color: var(--color-indigo-dark);
+}
+
+.status-completed,
+.cal-status--ok,
+.inline-alert-success {
+  background: var(--color-success-light);
+  color: var(--color-success-text);
+}
+
+.severity-high,
+.status-paused,
+.status-cancelled,
+.status-needs_review,
+.inline-alert-danger,
+.tone-red {
+  background: var(--color-danger-light);
+  color: var(--color-danger-text);
+}
+
+.severity-medium,
+.status-review,
+.status-low_adherence,
+.status-missed,
+.inline-alert-warning {
+  background: var(--color-warning-light);
+  color: var(--color-warning-text);
+}
+
+.severity-low,
+.status-stable,
+.cal-status--muted {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+/* Tables */
+.table-wrap {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+.table-wrap th {
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.table-wrap td {
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.table-wrap tr:hover td {
+  background: var(--color-surface-alt);
+}
+
+/* Progress bars */
+.bar-track,
+.cal-progress-bar-wrap,
+.piano-hero-progress__rail,
+.bubble-pop-progress,
+.piano-hold-meter,
+.checkin-range__track-bg {
+  background: var(--color-surface);
+  border-radius: var(--radius-full);
+}
+
+.bar-fill,
+.cal-progress-bar-fill,
+.piano-hero-progress__fill,
+.bubble-pop-progress__fill,
+.piano-hold-meter-fill {
+  background: var(--color-indigo);
+  border-radius: var(--radius-full);
+}
+
+.status-completed ~ .bar-track .bar-fill,
+.progress-game-row .status-completed ~ .progress-row .bar-fill {
+  background: var(--color-success);
+}
+
+/* Game cards (patient listing only) */
+.patient-experience .assignment-card,
+.patient-experience .rg-game-card {
+  border: 1px solid var(--color-border);
+  border-top: 4px solid var(--color-indigo);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: none;
+}
+
+.patient-experience .assignment-card h3,
+.patient-experience .rg-game-card__title {
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.patient-experience .assignment-meta span,
+.patient-experience .rg-game-meta span {
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* Achievement elements */
+.patient-experience .rg-game-minichip,
+.patient-experience .game-completion-medal,
+.patient-experience .pregame-chip--level,
+.patient-experience .tone-amber .status-pill {
+  border: 1px solid var(--color-amber-dark);
+  background: var(--color-amber-light);
+  color: var(--color-amber-text);
+  border-radius: var(--radius-full);
+}
+
+/* Alert and notification panels */
+.inline-alert,
+.warning-callout,
+.checkin-warning {
+  border-color: var(--color-warning);
+  background: var(--color-warning-light);
+  color: var(--color-warning-text);
+}
+
+.error-text,
+.text-danger {
+  color: var(--color-danger-text);
+}
+
+/* Live stream / glove panel */
+.current-gesture,
+.cal-live-panel {
+  border-color: var(--color-indigo);
+  background: var(--color-indigo-light);
+}
+
+.current-gesture .gesture-name,
+.cal-live-panel .cal-status {
+  color: var(--color-indigo-dark);
+}
+
+/* Animations */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes fadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes borderPulse {
+    0%,
+    100% {
+      border-color: var(--color-indigo);
+    }
+    50% {
+      border-color: var(--color-indigo-mid);
+    }
+  }
+
+  @keyframes achievementPop {
+    0% {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+    70% {
+      opacity: 1;
+      transform: scale(1.05);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .page-stack > :is(.surface, .metric-grid, .two-column, .patient-grid, .chart-grid) {
+    animation: fadeUp 0.3s ease both;
+  }
+
+  .patient-experience .assignment-card,
+  .patient-experience .rg-game-card {
+    transition: transform 0.18s ease, border-color 0.18s ease;
+  }
+
+  .patient-experience .assignment-card:hover,
+  .patient-experience .rg-game-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--color-border-strong);
+  }
+
+  :is(.primary-button, .secondary-button, .toggle-button, .icon-button, .link-button, .dashboard-more-link) {
+    transition: background 0.15s ease, transform 0.12s ease;
+  }
+
+  :is(.primary-button, .secondary-button, .toggle-button, .icon-button, .link-button, .dashboard-more-link):hover {
+    transform: translateY(-1px);
+  }
+
+  :is(.primary-button, .secondary-button, .toggle-button, .icon-button, .link-button, .dashboard-more-link):active {
+    opacity: 0.9;
+    transform: translateY(0);
+  }
+
+  .sidebar nav button,
+  .patient-side-nav button {
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+
+  .bar-fill,
+  .cal-progress-bar-fill,
+  .piano-hero-progress__fill,
+  .bubble-pop-progress__fill,
+  .piano-hold-meter-fill {
+    transition: width 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .current-gesture,
+  .cal-live-panel {
+    animation: borderPulse 2s ease-in-out infinite;
+  }
+
+  .patient-experience .game-completion-medal,
+  .patient-experience .rg-game-minichip {
+    animation: achievementPop 0.35s ease both;
+  }
+}
+
+/* Utility classes */
+.text-danger {
+  color: var(--color-danger-text);
+}
+
+.text-warning {
+  color: var(--color-warning-text);
+}
+
+.text-success {
+  color: var(--color-success-text);
+}
+
+/* layout-safe: keep top metrics horizontal after generic responsive metric rules; requested dashboard layout depends on this grid. */
 .workspace .doctor-metric-grid.metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
