@@ -784,17 +784,21 @@ export function PatientExperience({
       sessionId={"assignmentId" in route ? route.assignmentId : undefined}
     >
       <section className={`patient-experience patient-experience--${experienceMode}`}>
-        <PatientPortalShell
-          patient={patient}
-          activeRoute={route.step}
-          onHome={() => goToPatientScreen("home")}
-          onCalendar={() => goToPatientScreen("calendar")}
-          onProgress={() => goToPatientScreen("progress")}
-          onAssistant={() => goToPatientScreen("assistant")}
-          onLogout={onLogout}
-        >
-          {content}
-        </PatientPortalShell>
+        {experienceMode === "doctor-library" ? (
+          content
+        ) : (
+          <PatientPortalShell
+            patient={patient}
+            activeRoute={route.step}
+            onHome={() => goToPatientScreen("home")}
+            onCalendar={() => goToPatientScreen("calendar")}
+            onProgress={() => goToPatientScreen("progress")}
+            onAssistant={() => goToPatientScreen("assistant")}
+            onLogout={onLogout}
+          >
+            {content}
+          </PatientPortalShell>
+        )}
       </section>
     </PatientInputProvider>
   );

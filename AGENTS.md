@@ -110,6 +110,8 @@ gh issue list --repo MohsinCoding/gloving
 
 Rep counting: a fist→open gesture transition increments `repsCompleted`.
 
+Live Monitor exercise options come from `exerciseTemplates` in `src/data/mockData.ts`. That list includes the four rehab games plus mapped basic finger drills from `src/data/exercises.ts`, so doctor live sessions can start single-finger and multi-finger exercises from the same dropdown.
+
 `src/lib/backend.ts` owns all HTTP and WebSocket calls. It maps backend JSON shapes to the frontend's internal types, normalising missing fields and deriving `accuracy`, `holdMs`, and `smoothness` if absent.
 
 `src/lib/gesture.ts` contains pure gesture utilities (classification, accuracy scoring, patient summaries). This is the only tested file (`gesture.test.ts` via Vitest).

@@ -1,14 +1,57 @@
 import type {
   ExerciseTemplate,
   FingerBends,
+  FingerName,
   GestureEvent,
   GestureName,
   Patient,
   RehabSession
 } from "../types";
 import { clampPercent, gestureTargets, scoreAccuracy } from "../lib/gesture";
+import { fingerExercises } from "./exercises";
 
 const gestures: GestureName[] = ["open", "fist", "pinch", "point", "tap_index", "flick"];
+
+function liveMonitorGestureForExercise(fingers: FingerName[]): GestureName {
+  if (fingers.length === 1) {
+    return `tap_${fingers[0]}` as GestureName;
+  }
+
+  if (fingers.includes("thumb")) {
+    return "pinch";
+  }
+
+  return "fist";
+}
+
+function exerciseDurationMinutes(difficulty: ExerciseTemplate["difficulty"]): number {
+  if (difficulty === "hard") {
+    return 8;
+  }
+
+  if (difficulty === "medium") {
+    return 6;
+  }
+
+  return 5;
+}
+
+function formatFingerTargets(fingers: FingerName[]): string {
+  return fingers.map((finger) => finger[0].toUpperCase() + finger.slice(1)).join(" + ");
+}
+
+export const basicExerciseTemplates: ExerciseTemplate[] = fingerExercises.map((exercise) => ({
+  id: exercise.id,
+  name: exercise.name,
+  goal: exercise.description,
+  targetGesture: liveMonitorGestureForExercise(exercise.fingers),
+  durationMinutes: exerciseDurationMinutes(exercise.difficulty),
+  targetReps: exercise.reps,
+  difficulty: exercise.difficulty,
+  instructions: `Complete ${exercise.reps} controlled reps. Target: ${formatFingerTargets(
+    exercise.fingers
+  )}. ${exercise.description}`
+}));
 
 export const exerciseTemplates: ExerciseTemplate[] = [
   {
@@ -54,7 +97,8 @@ export const exerciseTemplates: ExerciseTemplate[] = [
     difficulty: "medium",
     instructions:
       "Use a controlled flick gesture to aim the striker and pocket carrom coins."
-  }
+  },
+  ...basicExerciseTemplates
 ];
 
 function noise(seed: number, spread = 8): number {
