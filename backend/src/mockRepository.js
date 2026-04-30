@@ -192,6 +192,7 @@ const assignments = [
 
 const sessions = [];
 const gestureEvents = [];
+const exerciseAssignments = [];
 let latestGloveEvent = null;
 const calibrations = new Map();
 
@@ -801,6 +802,39 @@ async function deleteAssignment(id) {
   return true;
 }
 
+async function listPatientExerciseAssignments(patientId) {
+  return exerciseAssignments
+    .filter((assignment) => assignment.patientId === patientId)
+    .sort((a, b) => b.assignedAt.localeCompare(a.assignedAt))
+    .map((assignment) => ({ ...assignment }));
+}
+
+async function createExerciseAssignment(payload) {
+  const existingIndex = exerciseAssignments.findIndex(
+    (assignment) => assignment.patientId === payload.patientId && assignment.exerciseId === payload.exerciseId
+  );
+  if (existingIndex !== -1) exerciseAssignments.splice(existingIndex, 1);
+  const assignedAt =
+    payload.assignedAt instanceof Date
+      ? payload.assignedAt.toISOString()
+      : payload.assignedAt || new Date().toISOString();
+  const stored = {
+    id: payload.id || `exercise-assignment-${randomUUID().slice(0, 8)}`,
+    patientId: payload.patientId,
+    exerciseId: payload.exerciseId,
+    assignedAt
+  };
+  exerciseAssignments.unshift(stored);
+  return { ...stored };
+}
+
+async function deleteExerciseAssignment(id) {
+  const index = exerciseAssignments.findIndex((assignment) => assignment.id === id);
+  if (index === -1) return false;
+  exerciseAssignments.splice(index, 1);
+  return true;
+}
+
 async function listPatientAppointments(patientId) {
   return appointments
     .filter((appointment) => appointment.patientId === patientId)
@@ -905,6 +939,9 @@ module.exports = {
   createAssignment,
   updateAssignment,
   deleteAssignment,
+  listPatientExerciseAssignments,
+  createExerciseAssignment,
+  deleteExerciseAssignment,
   listPatientAppointments,
   listAppointments,
   createAppointment,

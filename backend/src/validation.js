@@ -119,6 +119,13 @@ const assignmentSchema = z.object({
   status: z.enum(["assigned", "completed", "missed"]).default("assigned")
 });
 
+const exerciseAssignmentSchema = z.object({
+  id: z.string().min(1).optional(),
+  patientId: z.string().min(1),
+  exerciseId: z.string().min(1),
+  assignedAt: z.coerce.date().optional()
+});
+
 const appointmentSchema = z.object({
   patientId: z.string().min(1),
   doctorId: z.string().min(1).default("doctor-1"),
@@ -145,6 +152,7 @@ module.exports = {
   createExerciseSchema,
   exerciseResultSchema,
   assignmentSchema,
+  exerciseAssignmentSchema,
   appointmentSchema,
   progressSummarySchema,
   updatePatientNotesSchema

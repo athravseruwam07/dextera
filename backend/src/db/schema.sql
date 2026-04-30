@@ -83,9 +83,18 @@ CREATE TABLE IF NOT EXISTS exercise_results (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS exercise_assignments (
+  id TEXT PRIMARY KEY,
+  patient_id TEXT NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  exercise_id TEXT NOT NULL,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (patient_id, exercise_id)
+);
+
 CREATE INDEX IF NOT EXISTS gesture_events_patient_recorded_idx ON gesture_events(patient_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS gesture_events_session_recorded_idx ON gesture_events(session_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS sessions_patient_started_idx ON sessions(patient_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS sessions_active_patient_idx ON sessions(patient_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS exercise_assignments_patient_idx ON exercise_assignments(patient_id, assigned_at DESC);
 
 ALTER TABLE therapists ADD COLUMN IF NOT EXISTS auth_user_id UUID UNIQUE;

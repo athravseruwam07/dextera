@@ -13,6 +13,7 @@ const {
   createExerciseSchema,
   exerciseResultSchema,
   assignmentSchema,
+  exerciseAssignmentSchema,
   appointmentSchema,
   progressSummarySchema,
   updatePatientNotesSchema
@@ -168,6 +169,13 @@ function createApp(realtime) {
   );
 
   app.get(
+    "/api/patients/:id/exercise-assignments",
+    asyncHandler(async (req, res) => {
+      res.json(repo.listPatientExerciseAssignments ? await repo.listPatientExerciseAssignments(req.params.id) : []);
+    })
+  );
+
+  app.get(
     "/api/patients/:id/appointments",
     asyncHandler(async (req, res) => {
       res.json(repo.listPatientAppointments ? await repo.listPatientAppointments(req.params.id) : []);
@@ -298,6 +306,27 @@ function createApp(realtime) {
       if (!repo.deleteAssignment) return res.status(501).json({ error: "Assignment delete is not supported" });
       const removed = await repo.deleteAssignment(req.params.id);
       if (!removed) return res.status(404).json({ error: "Assignment not found" });
+      res.status(204).send();
+    })
+  );
+
+  app.post(
+    "/api/exercise-assignments",
+    asyncHandler(async (req, res) => {
+      const input = validate(exerciseAssignmentSchema, req.body);
+      if (!repo.createExerciseAssignment) return res.status(501).json({ error: "Exercise assignments are not supported" });
+      res.status(201).json(await repo.createExerciseAssignment(input));
+    })
+  );
+
+  app.delete(
+    "/api/exercise-assignments/:id",
+    asyncHandler(async (req, res) => {
+      if (!repo.deleteExerciseAssignment) {
+        return res.status(501).json({ error: "Exercise assignment delete is not supported" });
+      }
+      const removed = await repo.deleteExerciseAssignment(req.params.id);
+      if (!removed) return res.status(404).json({ error: "Exercise assignment not found" });
       res.status(204).send();
     })
   );
