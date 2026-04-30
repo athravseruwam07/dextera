@@ -339,7 +339,37 @@ export async function fetchBackendPatients(): Promise<Patient[]> {
     })
   );
 
-  return patients.length > 0 ? patients : seedPatients;
+  return patients;
+}
+
+export async function fetchBackendPatient(patientId: string): Promise<Patient> {
+  const patient = await apiFetch<BackendPatient>(`/api/patients/${encodeURIComponent(patientId)}`);
+  const backendSessions = await apiFetch<BackendSession[]>(`/api/patients/${encodeURIComponent(patient.id)}/sessions`);
+  const sessions = await Promise.all(
+    backendSessions.map(async (session) => {
+      const backendEvents = await apiFetch<BackendGestureEvent[]>(`/api/sessions/${session.id}/events`);
+      const events = backendEvents.map((event) => mapBackendGestureEvent(event, patient.id));
+      return mapBackendSession(session, events);
+    })
+  );
+  return mapBackendPatient(patient, sessions);
+}
+
+export async function createBackendPatientProfile(payload: {
+  id: string;
+  fullName: string;
+  notes?: string;
+}): Promise<Patient> {
+  const patient = await apiFetch<BackendPatient>("/api/patients", {
+    method: "POST",
+    body: JSON.stringify({
+      id: payload.id,
+      displayName: payload.fullName,
+      dominantHand: "unknown",
+      notes: payload.notes ?? "New patient account"
+    })
+  });
+  return mapBackendPatient(patient, []);
 }
 
 export async function fetchBackendExercises(): Promise<ExerciseTemplate[]> {
